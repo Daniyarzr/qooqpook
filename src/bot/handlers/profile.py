@@ -8,6 +8,7 @@ from src.bot.texts.messages import BALANCE, BALANCE_HISTORY_HEADER, BALANCE_HIST
 from src.core.config import Settings
 from src.core.enums import TransactionType
 from src.core.utils import build_referral_link, format_datetime_ru
+from src.models import User
 from src.repositories import UserRepository
 from src.services import BalanceService, SubscriptionService
 from src.services.devices import DeviceService
