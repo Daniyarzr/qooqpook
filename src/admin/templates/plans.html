@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Тарифы{% endblock %}
+{% block content %}
+<h2>💎 Тарифные планы</h2>
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Название</th>
+            <th>Дней</th>
+            <th>Цена</th>
+            <th>Статус</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for plan in plans %}
+        <tr>
+            <td>{{ plan.id }}</td>
+            <td>{{ plan.name }}</td>
+            <td>{{ plan.days }}</td>
+            <td>{{ plan.price }} ₽</td>
+            <td>
+                {% if plan.is_active %}
+                <span class="badge badge-green">Активен</span>
+                {% else %}
+                <span class="badge badge-red">Неактивен</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        {% if not plans %}
+        <tr><td colspan="5" style="text-align:center;color:#8b949e;">Тарифы не настроены. Добавьте через seed или API.</td></tr>
+        {% endif %}
+    </tbody>
+</table>
+{% endblock %}

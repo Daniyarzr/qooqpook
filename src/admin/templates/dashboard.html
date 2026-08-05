@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h2>📊 Dashboard</h2>
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.total_users }}</div>
+        <div class="stat-label">👥 Всего пользователей</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-value">{{ stats.active_subscriptions }}</div>
+        <div class="stat-label">✅ Активных подписок</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-value">{{ stats.expired_subscriptions }}</div>
+        <div class="stat-label">🔒 Истекших</div>
+    </div>
+    <div class="stat-card blue">
+        <div class="stat-value">{{ stats.total_revenue }} ₽</div>
+        <div class="stat-label">💰 Выручка</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.total_balance }} ₽</div>
+        <div class="stat-label">💳 Балансы пользователей</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.active_servers }}</div>
+        <div class="stat-label">🌍 Серверов</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.new_users_7d }}</div>
+        <div class="stat-label">📈 Новых за 7 дней</div>
+    </div>
+</div>
+{% endblock %}

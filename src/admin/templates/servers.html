@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Серверы{% endblock %}
+{% block content %}
+<h2>🌍 VPN Серверы</h2>
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Название</th>
+            <th>Страна</th>
+            <th>Хост</th>
+            <th>Порт</th>
+            <th>Протокол</th>
+            <th>Пользователей</th>
+            <th>Статус</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for server in servers %}
+        <tr>
+            <td>{{ server.id }}</td>
+            <td>{{ server.country_flag }} {{ server.name }}</td>
+            <td>{{ server.country }}</td>
+            <td>{{ server.host }}</td>
+            <td>{{ server.port }}</td>
+            <td>{{ server.protocol }}</td>
+            <td>{{ server.current_users }}/{{ server.max_users }}</td>
+            <td>
+                {% if server.status.value == 'online' %}
+                <span class="badge badge-green">Online</span>
+                {% else %}
+                <span class="badge badge-red">{{ server.status.value }}</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        {% if not servers %}
+        <tr><td colspan="8" style="text-align:center;color:#8b949e;">Серверы не настроены.</td></tr>
+        {% endif %}
+    </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Пользователи{% endblock %}
+{% block content %}
+<h2>👥 Пользователи</h2>
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Telegram</th>
+            <th>Имя</th>
+            <th>UUID</th>
+            <th>Баланс</th>
+            <th>Реф. код</th>
+            <th>Статус</th>
+            <th>Дата</th>
+            <th>Действия</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for user in users %}
+        <tr>
+            <td>{{ user.id }}</td>
+            <td>{{ user.telegram_id }}</td>
+            <td>{{ user.first_name or user.username or '—' }}</td>
+            <td><code>{{ user.client_uuid }}</code></td>
+            <td>{{ user.balance }} ₽</td>
+            <td>{{ user.referral_code }}</td>
+            <td>
+                {% if user.is_banned %}
+                <span class="badge badge-red">Заблокирован</span>
+                {% else %}
+                <span class="badge badge-green">Активен</span>
+                {% endif %}
+            </td>
+            <td>{{ user.created_at.strftime('%d.%m.%Y') }}</td>
+            <td>
+                {% if user.is_banned %}
+                <form method="post" action="/users/{{ user.id }}/unban" style="display:inline">
+                    <button type="submit" class="btn-sm btn-success">Разблокировать</button>
+                </form>
+                {% else %}
+                <form method="post" action="/users/{{ user.id }}/ban" style="display:inline">
+                    <button type="submit" class="btn-sm btn-danger">Заблокировать</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QooQ VPN Admin — {% block title %}{% endblock %}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f1117;
+            color: #e1e4e8;
+            display: flex;
+            min-height: 100vh;
+        }
+        .sidebar {
+            width: 240px;
+            background: #161b22;
+            border-right: 1px solid #30363d;
+            padding: 24px 0;
+            flex-shrink: 0;
+        }
+        .sidebar-logo {
+            padding: 0 24px 24px;
+            font-size: 20px;
+            font-weight: 700;
+            color: #f0f6fc;
+            border-bottom: 1px solid #30363d;
+        }
+        .sidebar nav a {
+            display: block;
+            padding: 10px 24px;
+            color: #8b949e;
+            text-decoration: none;
+            font-size: 14px;
+            transition: all 0.15s;
+        }
+        .sidebar nav a:hover, .sidebar nav a.active {
+            color: #f0f6fc;
+            background: rgba(88, 166, 255, 0.1);
+        }
+        .main {
+            flex: 1;
+            padding: 32px;
+            overflow-y: auto;
+        }
+        h2 { font-size: 24px; margin-bottom: 24px; color: #f0f6fc; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 16px;
+        }
+        .stat-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .stat-card.green { border-color: rgba(46, 204, 113, 0.3); }
+        .stat-card.red { border-color: rgba(231, 76, 60, 0.3); }
+        .stat-card.blue { border-color: rgba(52, 152, 219, 0.3); }
+        .stat-value { font-size: 28px; font-weight: 700; color: #f0f6fc; }
+        .stat-label { font-size: 13px; color: #8b949e; margin-top: 4px; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #161b22;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #30363d;
+        }
+        th, td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid #21262d;
+            font-size: 14px;
+        }
+        th { background: #0d1117; color: #8b949e; font-weight: 600; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-green { background: rgba(46, 204, 113, 0.15); color: #2ecc71; }
+        .badge-red { background: rgba(231, 76, 60, 0.15); color: #e74c3c; }
+        .btn-sm {
+            padding: 4px 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            color: #fff;
+        }
+        .btn-danger { background: #da3633; }
+        .btn-success { background: #238636; }
+        .logout { margin-top: auto; padding: 24px; }
+        .logout a { color: #f85149; text-decoration: none; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-logo">🛡️ QooQ Admin</div>
+        <nav>
+            <a href="/dashboard">📊 Dashboard</a>
+            <a href="/users">👥 Пользователи</a>
+            <a href="/plans">💎 Тарифы</a>
+            <a href="/servers">🌍 Серверы</a>
+        </nav>
+        <div class="logout">
+            <a href="/logout">🚪 Выйти ({{ admin }})</a>
+        </div>
+    </div>
+    <div class="main">
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

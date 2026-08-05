@@ -1,0 +1,41 @@
+# Локальные секреты и окружение
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# IDE
+.idea/
+.vscode/
+
+# DB
+*.db
+
+# Logs / temp
+*.log
+/tmp/
+
+# Ops-скрипты с доступом к серверам (запускаются локально, не в репо)
+scripts/diagnose_*.py
+scripts/probe_*.py
+scripts/inspect_*.py
+scripts/verify_setup.py
+scripts/fix_xray_tunnel.py
+scripts/setup_yandex_ssh.py
+scripts/test_prod_sub.py
+scripts/finish_deploy.py
+scripts/check_server.py
+scripts/setup_domain.py
