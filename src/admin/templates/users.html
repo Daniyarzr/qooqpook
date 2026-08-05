@@ -8,8 +8,9 @@
             <th>ID</th>
             <th>Telegram</th>
             <th>Имя</th>
-            <th>UUID</th>
+            <th>UUID подписки</th>
             <th>Баланс</th>
+            <th>Подписка</th>
             <th>Реф. код</th>
             <th>Статус</th>
             <th>Дата</th>
@@ -17,13 +18,30 @@
         </tr>
     </thead>
     <tbody>
-        {% for user in users %}
+        {% for row in user_rows %}
+        {% set user = row.user %}
+        {% set sub = row.subscription %}
         <tr>
-            <td>{{ user.id }}</td>
+            <td><a href="/users/{{ user.id }}" class="user-link">#{{ user.id }}</a></td>
             <td>{{ user.telegram_id }}</td>
-            <td>{{ user.first_name or user.username or '—' }}</td>
-            <td><code>{{ user.client_uuid }}</code></td>
+            <td><a href="/users/{{ user.id }}" class="user-link">{{ user.first_name or user.username or '—' }}</a></td>
+            <td>
+                {% if sub %}
+                <code>{{ sub.client_uuid }}</code>
+                {% else %}
+                —
+                {% endif %}
+            </td>
             <td>{{ user.balance }} ₽</td>
+            <td>
+                {% if sub %}
+                <span class="badge badge-green">{{ sub.status.value }}</span>
+                <br>
+                <small>до {{ sub.expires_at.strftime('%d.%m.%Y %H:%M') }}</small>
+                {% else %}
+                <span class="badge badge-red">нет</span>
+                {% endif %}
+            </td>
             <td>{{ user.referral_code }}</td>
             <td>
                 {% if user.is_banned %}
@@ -34,15 +52,27 @@
             </td>
             <td>{{ user.created_at.strftime('%d.%m.%Y') }}</td>
             <td>
-                {% if user.is_banned %}
-                <form method="post" action="/users/{{ user.id }}/unban" style="display:inline">
-                    <button type="submit" class="btn-sm btn-success">Разблокировать</button>
-                </form>
-                {% else %}
-                <form method="post" action="/users/{{ user.id }}/ban" style="display:inline">
-                    <button type="submit" class="btn-sm btn-danger">Заблокировать</button>
-                </form>
-                {% endif %}
+                <div class="actions">
+                    <a href="/users/{{ user.id }}" class="btn-sm btn-success" style="text-decoration:none;display:inline-block;">Профиль</a>
+                    {% if sub %}
+                    <form method="post" action="/users/{{ user.id }}/subscription/deactivate" style="display:inline">
+                        <button type="submit" class="btn-sm btn-warning" title="Отключить доступ, запись останется">Деактивировать</button>
+                    </form>
+                    <form method="post" action="/users/{{ user.id }}/subscription/delete" style="display:inline"
+                          onsubmit="return confirm('Удалить подписку пользователя #{{ user.id }}? Доступ будет отключён.');">
+                        <button type="submit" class="btn-sm btn-danger">Удалить подписку</button>
+                    </form>
+                    {% endif %}
+                    {% if user.is_banned %}
+                    <form method="post" action="/users/{{ user.id }}/unban" style="display:inline">
+                        <button type="submit" class="btn-sm btn-success">Разблокировать</button>
+                    </form>
+                    {% else %}
+                    <form method="post" action="/users/{{ user.id }}/ban" style="display:inline">
+                        <button type="submit" class="btn-sm btn-danger">Заблокировать</button>
+                    </form>
+                    {% endif %}
+                </div>
             </td>
         </tr>
         {% endfor %}

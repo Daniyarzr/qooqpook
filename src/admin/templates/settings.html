@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
+{% block content %}
+<h2>⚙️ Настройки сервиса</h2>
+
+{% if success %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Настройки сохранены</p>
+{% endif %}
+{% if error %}
+<p class="muted" style="color:#e74c3c;margin-bottom:16px;">⚠️ {{ error }}</p>
+{% endif %}
+
+<section class="card" style="max-width:560px;">
+    <h3>🎁 Реферальная программа</h3>
+    <p class="muted" style="margin-bottom:16px;">
+        Скидка применяется автоматически по реферальной ссылке (без промокода):
+        приглашённый получает скидку на первую покупку, пригласивший — за каждого друга.
+    </p>
+    <form method="post" action="/settings/referral-discount" class="inline-form">
+        <label for="referral_discount_percent">Скидка за реферала, %</label>
+        <input
+            type="number"
+            id="referral_discount_percent"
+            name="referral_discount_percent"
+            min="0"
+            max="100"
+            value="{{ referral_discount_percent }}"
+            class="input-sm"
+            required
+        >
+        <button type="submit" class="btn-sm btn-success">Сохранить</button>
+    </form>
+    <p class="muted" style="margin-top:12px;">
+        Пример: 3 приглашённых друга × {{ referral_discount_percent }}% =
+        {{ referral_discount_percent * 3 }}% скидки (не более 100%).
+    </p>
+</section>
+{% endblock %}

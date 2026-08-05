@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Промокоды{% endblock %}
+{% block content %}
+<h2>🎟 Промокоды</h2>
+
+{% if error %}
+<p class="muted" style="color:#e74c3c;margin-bottom:16px;">⚠️ {{ error }}</p>
+{% endif %}
+{% if success == 'created' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Промокод создан</p>
+{% elif success == 'deleted' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Промокод удалён</p>
+{% endif %}
+
+<section class="card" style="margin-bottom:24px;">
+    <h3>Создать промокод</h3>
+    <form method="post" action="/promo-codes/create" class="inline-form" style="flex-direction:column;align-items:stretch;">
+        <div class="inline-form">
+            <input type="text" name="code" placeholder="Код (SUMMER20)" class="input-sm" required maxlength="32" style="text-transform:uppercase;">
+            <select name="discount_type" class="input-sm" required>
+                <option value="percent">Процент (%)</option>
+                <option value="fixed">Фиксированная сумма (₽)</option>
+            </select>
+            <input type="number" name="discount_value" step="0.01" min="0.01" placeholder="Размер скидки" class="input-sm" required>
+        </div>
+        <div class="inline-form">
+            <input type="text" name="description" placeholder="Описание (необязательно)" class="input-sm" style="flex:1;">
+            <select name="plan_id" class="input-sm">
+                <option value="">Все тарифы</option>
+                {% for plan in plans %}
+                <option value="{{ plan.id }}">{{ plan.name }} ({{ plan.price }} ₽)</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="inline-form">
+            <input type="number" name="max_uses" min="1" placeholder="Лимит использований (пусто = ∞)" class="input-sm">
+            <input type="number" name="max_uses_per_user" min="1" value="1" placeholder="На пользователя" class="input-sm" required>
+            <input type="datetime-local" name="valid_until" class="input-sm" placeholder="Действует до">
+            <button type="submit" class="btn-sm btn-success">➕ Создать</button>
+        </div>
+    </form>
+</section>
+
+<table>
+    <thead>
+        <tr>
+            <th>Код</th>
+            <th>Скидка</th>
+            <th>Тариф</th>
+            <th>Использовано</th>
+            <th>Действует до</th>
+            <th>Статус</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for promo in promo_codes %}
+        <tr>
+            <td>
+                <code>{{ promo.code }}</code>
+                {% if promo.description %}
+                <div class="muted">{{ promo.description }}</div>
+                {% endif %}
+            </td>
+            <td>
+                {% if promo.discount_type.value == 'percent' %}
+                {{ promo.discount_value }}%
+                {% else %}
+                {{ promo.discount_value }} ₽
+                {% endif %}
+            </td>
+            <td>{{ promo.plan.name if promo.plan else 'Все' }}</td>
+            <td>
+                {{ promo.used_count }}{% if promo.max_uses %} / {{ promo.max_uses }}{% else %} / ∞{% endif %}
+                <div class="muted">макс. {{ promo.max_uses_per_user }} на юзера</div>
+            </td>
+            <td>
+                {% if promo.valid_until %}
+                {{ promo.valid_until.strftime('%d.%m.%Y %H:%M') }}
+                {% else %}
+                —
+                {% endif %}
+            </td>
+            <td>
+                {% if promo.is_active %}
+                <span class="badge badge-green">Активен</span>
+                {% else %}
+                <span class="badge badge-red">Выключен</span>
+                {% endif %}
+            </td>
+            <td>
+                <div class="actions">
+                    <form method="post" action="/promo-codes/{{ promo.id }}/toggle">
+                        <button type="submit" class="btn-sm btn-warning">
+                            {% if promo.is_active %}Выключить{% else %}Включить{% endif %}
+                        </button>
+                    </form>
+                    {% if promo.used_count == 0 %}
+                    <form method="post" action="/promo-codes/{{ promo.id }}/delete"
+                          onsubmit="return confirm('Удалить промокод {{ promo.code }}?');">
+                        <button type="submit" class="btn-sm btn-danger">Удалить</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+        {% if not promo_codes %}
+        <tr><td colspan="7" style="text-align:center;color:#8b949e;">Промокодов пока нет</td></tr>
+        {% endif %}
+    </tbody>
+</table>
+{% endblock %}

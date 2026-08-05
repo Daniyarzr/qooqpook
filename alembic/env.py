@@ -7,8 +7,14 @@ from src.core.config import get_settings
 from src.db.base import Base
 from src.models import (  # noqa: F401 — register models
     AdminUser,
+    PaymentOrder,
+    PromoCode,
+    PromoCodeRedemption,
     ReferralReward,
+    SystemSetting,
     Subscription,
+    SubscriptionDevice,
+    SubscriptionHwid,
     SubscriptionPlan,
     Transaction,
     User,

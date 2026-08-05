@@ -44,6 +44,7 @@ VPN-платформа с продажей подписок через Telegram-
 ### Telegram-бот (aiogram 3)
 - [x] Главное меню, inline-кнопки
 - [x] Trial-подписка, тарифы, оплата с баланса
+- [x] **Пополнение баланса через ЮKassa** (карта, СБП и др.)
 - [x] Профиль с UUID и реферальным кодом
 - [x] Реферальные бонусы (% от покупки)
 - [x] Ссылка на подписку для Happ
@@ -54,7 +55,7 @@ VPN-платформа с продажей подписок через Telegram-
 - [x] Бан/разбан пользователей
 
 ### VPN / Xray
-- [x] Индивидуальный `client_uuid` на каждого пользователя
+- [x] Индивидуальный `client_uuid` на каждую подписку
 - [x] Генерация VLESS-ссылки (формат для Happ)
 - [x] Генерация полного JSON-профиля с **обходом RU-сайтов** (vk, yandex, ozon → direct)
 - [x] Синхронизация UUID на Yandex (`51.250.32.123`) по SSH
@@ -97,7 +98,7 @@ qooqpook/
 │   ├── models/         # User, Subscription, VpnServer, ...
 │   ├── repositories/   # доступ к БД
 │   ├── services/       # бизнес-логика, vpn_config, xray_sync
-│   ├── api/            # FastAPI: hub, sub_feed, miniapp
+│   ├── api/            # FastAPI: hub, sub_feed, miniapp, payments
 │   ├── bot/            # Telegram-бот
 │   └── admin/          # веб-админка (Jinja2)
 ├── alembic/            # миграции
@@ -150,9 +151,42 @@ XRAY_SYNC_ENABLED=true
 XRAY_SSH_HOST=51.250.32.123
 XRAY_SSH_USER=adminka
 XRAY_SSH_KEY_PATH=/root/.ssh/qooq_xray
+
+# Пополнение баланса (ЮKassa)
+YOOKASSA_SHOP_ID=ваш_shop_id
+YOOKASSA_SECRET_KEY=ваш_секретный_ключ
+YOOKASSA_RETURN_URL=https://t.me/ваш_бот
+DEPOSIT_AMOUNTS=100,300,500,1000,2000
 ```
 
 **Не коммитьте `.env`** — он в `.gitignore`.
+
+---
+
+## Пополнение баланса (ЮKassa)
+
+Пользователь пополняет баланс в боте: **💰 Баланс → 💳 Пополнить → сумма → оплата на странице ЮKassa**.
+
+После успешной оплаты:
+1. Webhook `POST /api/v1/payments/yookassa/webhook` зачисляет сумму на баланс
+2. Пользователь получает уведомление в Telegram
+3. Кнопка «🔄 Проверить оплату» — запасной вариант, если webhook задержался
+
+### Настройка
+
+1. Создайте магазин в [личном кабинете ЮKassa](https://yookassa.ru/)
+2. Добавьте в `.env` на сервере:
+   - `YOOKASSA_SHOP_ID` — ID магазина
+   - `YOOKASSA_SECRET_KEY` — секретный ключ API
+   - `YOOKASSA_RETURN_URL` — куда вернуть пользователя после оплаты (обычно `https://t.me/имя_бота`)
+3. В ЮKassa → **Интеграция → HTTP-уведомления** укажите URL:
+   ```
+   https://keys.qooqvpn.ru/api/v1/payments/yookassa/webhook
+   ```
+   Событие: `payment.succeeded`
+4. Перезапустите API и бота: `systemctl restart qooq-api qooq-bot`
+
+Для тестов используйте **тестовый** магазин и ключ с префиксом `test_`. Суммы пополнения задаются через `DEPOSIT_AMOUNTS` (по умолчанию 100–2000 ₽).
 
 ---
 
@@ -186,6 +220,7 @@ python scripts/redeploy.py
 - [x] Xray UUID sync
 - [x] RU-site bypass в profile-конфиге
 - [x] Production deploy
+- [x] Пополнение баланса через ЮKassa
 - [ ] Telegram Stars / крипто-оплата
 - [ ] Mini-app (полноценный WebApp)
 - [ ] Вторая ссылка в боте «с обходом RU»

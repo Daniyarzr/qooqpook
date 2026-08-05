@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+{% block title %}Пользователь #{{ user.id }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <a href="/users" class="back-link">← К списку</a>
+    <h2>👤 {{ user.first_name or user.username or ('User #' ~ user.id) }}</h2>
+</div>
+
+<div class="detail-grid">
+    <section class="card">
+        <h3>Профиль</h3>
+        <dl class="info-list">
+            <dt>ID</dt><dd>{{ user.id }}</dd>
+            <dt>Telegram ID</dt><dd><code>{{ user.telegram_id }}</code></dd>
+            <dt>Username</dt><dd>{{ user.username or '—' }}</dd>
+            <dt>Имя</dt><dd>{{ user.first_name or '—' }} {{ user.last_name or '' }}</dd>
+            <dt>Баланс</dt><dd><strong>{{ user.balance }} ₽</strong></dd>
+            <dt>Реф. код</dt><dd><code>{{ user.referral_code }}</code></dd>
+            <dt>Пригласил</dt><dd>{% if user.referred_by %}#{{ user.referred_by.id }}{% else %}—{% endif %}</dd>
+            <dt>Trial</dt><dd>{{ 'использован' if user.trial_used else 'доступен' }}</dd>
+            <dt>Статус</dt>
+            <dd>
+                {% if user.is_banned %}
+                <span class="badge badge-red">Заблокирован</span>
+                {% else %}
+                <span class="badge badge-green">Активен</span>
+                {% endif %}
+            </dd>
+            <dt>Регистрация</dt><dd>{{ user.created_at.strftime('%d.%m.%Y %H:%M') }}</dd>
+        </dl>
+
+        <div class="actions section-actions">
+            {% if user.is_banned %}
+            <form method="post" action="/users/{{ user.id }}/unban"><button type="submit" class="btn-sm btn-success">Разблокировать</button></form>
+            {% else %}
+            <form method="post" action="/users/{{ user.id }}/ban"><button type="submit" class="btn-sm btn-danger">Заблокировать</button></form>
+            {% endif %}
+        </div>
+
+        <h4 class="sub-heading">Корректировка баланса</h4>
+        <form method="post" action="/users/{{ user.id }}/balance/adjust" class="inline-form">
+            <input type="number" name="amount" step="0.01" placeholder="± сумма" required class="input-sm">
+            <input type="text" name="description" placeholder="Комментарий" class="input-sm" required>
+            <button type="submit" class="btn-sm btn-success">Применить</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <h3>Текущая подписка</h3>
+        {% if subscription %}
+        <dl class="info-list">
+            <dt>Статус</dt>
+            <dd>
+                {% if subscription.status.value == 'suspended' %}
+                <span class="badge badge-red">{{ subscription.status.value }}</span>
+                {% if subscription.suspension_reason == 'device_limit' %}
+                <span class="badge badge-red">лимит устройств</span>
+                {% endif %}
+                {% else %}
+                <span class="badge badge-green">{{ subscription.status.value }}</span>
+                {% endif %}
+            </dd>
+            <dt>Тариф</dt><dd>{{ subscription.plan.name if subscription.plan else ('Trial' if subscription.is_trial else '—') }}</dd>
+            <dt>Начало</dt><dd>{{ subscription.started_at.strftime('%d.%m.%Y %H:%M') }}</dd>
+            <dt>Окончание</dt><dd>{{ subscription.expires_at.strftime('%d.%m.%Y %H:%M') }}</dd>
+            <dt>UUID</dt><dd><code>{{ subscription.client_uuid }}</code></dd>
+            <dt>Token</dt><dd><code>{{ subscription.subscription_token }}</code></dd>
+            <dt>Ссылка</dt><dd><a href="{{ subscription_url }}" target="_blank" class="link">{{ subscription_url }}</a></dd>
+        </dl>
+
+        <div class="actions section-actions">
+            {% if device_limit_suspended %}
+            <form method="post" action="/users/{{ user.id }}/subscription/reactivate">
+                <button type="submit" class="btn-sm btn-success">✅ Восстановить подписку</button>
+            </form>
+            {% endif %}
+            <form method="post" action="/users/{{ user.id }}/subscription/deactivate">
+                <button type="submit" class="btn-sm btn-warning">Деактивировать</button>
+            </form>
+            <form method="post" action="/users/{{ user.id }}/subscription/delete"
+                  onsubmit="return confirm('Удалить подписку?');">
+                <button type="submit" class="btn-sm btn-danger">Удалить</button>
+            </form>
+        </div>
+
+        <h4 class="sub-heading">Продлить</h4>
+        <form method="post" action="/users/{{ user.id }}/subscription/extend" class="inline-form">
+            <input type="number" name="days" min="1" max="365" value="30" class="input-sm" required>
+            <span>дней</span>
+            <button type="submit" class="btn-sm btn-success">Продлить</button>
+        </form>
+
+        <h4 class="sub-heading">Устройства ({{ devices|length }}/{{ max_devices }})</h4>
+        {% if devices %}
+        <table>
+            <thead>
+                <tr><th>Название</th><th>UUID</th><th>Трафик</th><th>Создано</th><th></th></tr>
+            </thead>
+            <tbody>
+                {% for device in devices %}
+                <tr>
+                    <td>{{ device.name }}</td>
+                    <td><code>{{ device.client_uuid }}</code></td>
+                    <td>{{ '%.2f'|format((device.bytes_upload + device.bytes_download) / (1024**3)) }} GB</td>
+                    <td>{{ device.created_at.strftime('%d.%m.%Y') }}</td>
+                    <td>
+                        <form method="post" action="/users/{{ user.id }}/devices/{{ device.id }}/delete"
+                              onsubmit="return confirm('Удалить {{ device.name }}?');">
+                            <button type="submit" class="btn-sm btn-danger">Удалить</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">Устройств нет.</p>
+        {% endif %}
+        {% if devices|length < max_devices and not device_limit_suspended %}
+        <form method="post" action="/users/{{ user.id }}/devices/add" class="section-actions">
+            <button type="submit" class="btn-sm btn-success">➕ Добавить устройство</button>
+        </form>
+        {% endif %}
+
+        <h4 class="sub-heading">Подключения (HWID) — {{ hwids|length }}/{{ max_devices }}</h4>
+        <p class="muted">Уникальные клиенты, обращавшиеся к ссылке подписки. При превышении лимита подписка приостанавливается.</p>
+        {% if hwids %}
+        <table>
+            <thead>
+                <tr><th>HWID</th><th>User-Agent</th><th>Первый визит</th><th>Последний визит</th></tr>
+            </thead>
+            <tbody>
+                {% for entry in hwids %}
+                <tr>
+                    <td><code>{{ entry.hwid[:16] }}…</code></td>
+                    <td>{{ (entry.user_agent or '—')[:60] }}</td>
+                    <td>{{ entry.first_seen_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td>{{ entry.last_seen_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <form method="post" action="/users/{{ user.id }}/hwids/clear" class="section-actions"
+              onsubmit="return confirm('Сбросить все HWID?');">
+            <button type="submit" class="btn-sm btn-warning">🔄 Сбросить HWID</button>
+        </form>
+        {% else %}
+        <p class="muted">Подключений не зафиксировано.</p>
+        {% endif %}
+        {% else %}
+        <p class="muted">Активной подписки нет.</p>
+        {% endif %}
+    </section>
+
+    <section class="card card-wide">
+        <div class="card-header-row">
+            <h3>📊 Трафик</h3>
+            {% if subscription %}
+            <div class="actions">
+                <form method="post" action="/users/{{ user.id }}/traffic/sync">
+                    <button type="submit" class="btn-sm btn-success">🔄 Синхронизировать</button>
+                </form>
+                <form method="post" action="/users/{{ user.id }}/traffic/reset"
+                      onsubmit="return confirm('Сбросить счётчик трафика?');">
+                    <button type="submit" class="btn-sm btn-warning">Сбросить</button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if subscription %}
+        <div class="traffic-stats">
+            <div class="traffic-stat">
+                <div class="traffic-value">{{ traffic.upload_gb }} GB</div>
+                <div class="traffic-label">↑ Upload</div>
+                <div class="traffic-sub">{{ traffic.upload_human }}</div>
+            </div>
+            <div class="traffic-stat">
+                <div class="traffic-value">{{ traffic.download_gb }} GB</div>
+                <div class="traffic-label">↓ Download</div>
+                <div class="traffic-sub">{{ traffic.download_human }}</div>
+            </div>
+            <div class="traffic-stat highlight">
+                <div class="traffic-value">{{ traffic.total_gb }} GB</div>
+                <div class="traffic-label">Всего использовано</div>
+                <div class="traffic-sub">{{ traffic.total_human }}</div>
+            </div>
+            <div class="traffic-stat">
+                <div class="traffic-value">{% if traffic.limit_gb %}{{ traffic.limit_gb }} GB{% else %}∞{% endif %}</div>
+                <div class="traffic-label">Лимит</div>
+            </div>
+        </div>
+
+        {% if traffic.limit_gb %}
+        <div class="progress-wrap">
+            <div class="progress-bar" style="width: {{ traffic.used_percent or 0 }}%"></div>
+        </div>
+        <p class="muted">Использовано {{ traffic.used_percent or 0 }}% лимита</p>
+        {% endif %}
+
+        <p class="muted">
+            Последняя синхронизация:
+            {% if traffic.last_sync %}{{ traffic.last_sync.strftime('%d.%m.%Y %H:%M') }}{% else %}ещё не выполнялась{% endif %}
+            {% if not stats_enabled %} · Xray Stats API отключён{% endif %}
+        </p>
+        {% else %}
+        <p class="muted">Нет активной подписки для отслеживания трафика.</p>
+        {% endif %}
+    </section>
+</div>
+
+<section class="card" style="margin-top: 24px;">
+    <h3>📜 История подписок</h3>
+    {% if subscriptions_history %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Статус</th>
+                <th>Тариф</th>
+                <th>UUID</th>
+                <th>Трафик</th>
+                <th>Начало</th>
+                <th>Окончание</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for sub in subscriptions_history %}
+            <tr>
+                <td>{{ sub.id }}</td>
+                <td><span class="badge {% if sub.status.value in ['active', 'trial'] %}badge-green{% else %}badge-red{% endif %}">{{ sub.status.value }}</span></td>
+                <td>{{ sub.plan.name if sub.plan else ('Trial' if sub.is_trial else '—') }}</td>
+                <td><code>{{ sub.client_uuid }}</code></td>
+                <td>{{ '%.2f'|format((sub.bytes_upload + sub.bytes_download) / (1024**3)) }} GB</td>
+                <td>{{ sub.started_at.strftime('%d.%m.%Y') }}</td>
+                <td>{{ sub.expires_at.strftime('%d.%m.%Y') }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">Подписок нет.</p>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-top: 24px;">
+    <h3>💳 Последние операции</h3>
+    {% if transactions %}
+    <table>
+        <thead>
+            <tr><th>Дата</th><th>Тип</th><th>Сумма</th><th>Баланс после</th><th>Описание</th></tr>
+        </thead>
+        <tbody>
+            {% for tx in transactions %}
+            <tr>
+                <td>{{ tx.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                <td>{{ tx.type.value }}</td>
+                <td>{{ tx.amount }} ₽</td>
+                <td>{{ tx.balance_after }} ₽</td>
+                <td>{{ tx.description or '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">Операций нет.</p>
+    {% endif %}
+</section>
+{% endblock %}

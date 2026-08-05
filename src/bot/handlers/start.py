@@ -4,9 +4,10 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.bot.keyboards.inline import main_menu
-from src.bot.texts.messages import BANNED, WELCOME, WELCOME_BACK
+from src.bot.texts.messages import BANNED, REFERRAL_WELCOME, WELCOME, WELCOME_BACK
 from src.core.config import Settings
 from src.repositories import UserRepository
+from src.services.system_settings import SystemSettingsService
 
 router = Router(name="start")
 
@@ -37,6 +38,9 @@ async def cmd_start(message: Message, session: AsyncSession, settings: Settings)
             referred_by_id=referred_by_id,
         )
         text = WELCOME
+        if referred_by_id:
+            percent = await SystemSettingsService(session, settings).get_referral_discount_percent()
+            text += REFERRAL_WELCOME.format(discount_percent=percent)
     else:
         name = user.first_name or user.username or "друг"
         text = WELCOME_BACK.format(name=name)

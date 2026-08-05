@@ -1,35 +1,260 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
-<h2>📊 Dashboard</h2>
-<div class="stats-grid">
-    <div class="stat-card">
-        <div class="stat-value">{{ stats.total_users }}</div>
-        <div class="stat-label">👥 Всего пользователей</div>
-    </div>
-    <div class="stat-card green">
-        <div class="stat-value">{{ stats.active_subscriptions }}</div>
-        <div class="stat-label">✅ Активных подписок</div>
-    </div>
-    <div class="stat-card red">
-        <div class="stat-value">{{ stats.expired_subscriptions }}</div>
-        <div class="stat-label">🔒 Истекших</div>
-    </div>
-    <div class="stat-card blue">
-        <div class="stat-value">{{ stats.total_revenue }} ₽</div>
-        <div class="stat-label">💰 Выручка</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-value">{{ stats.total_balance }} ₽</div>
-        <div class="stat-label">💳 Балансы пользователей</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-value">{{ stats.active_servers }}</div>
-        <div class="stat-label">🌍 Серверов</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-value">{{ stats.new_users_7d }}</div>
-        <div class="stat-label">📈 Новых за 7 дней</div>
-    </div>
+<div class="dash-header">
+    <h2>📊 Dashboard</h2>
+    <span class="dash-updated">Обновлено: {{ stats.generated_at.strftime('%d.%m.%Y %H:%M') }} UTC</span>
 </div>
+
+<section class="dashboard-section">
+    <div class="section-title">👥 Пользователи</div>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ stats.users.total }}</div>
+            <div class="stat-label">Всего пользователей</div>
+            <div class="stat-sub">активных: {{ stats.users.active }} · заблок.: {{ stats.users.banned }}</div>
+        </div>
+        <div class="stat-card green">
+            <div class="stat-value">{{ stats.users.paying }}</div>
+            <div class="stat-label">Платящих пользователей</div>
+            <div class="stat-sub">конверсия {{ stats.users.conversion_pct }}%</div>
+        </div>
+        <div class="stat-card blue">
+            <div class="stat-value">{{ stats.users.new_7d }}</div>
+            <div class="stat-label">Новых за 7 дней</div>
+            <div class="stat-sub">сегодня: +{{ stats.users.new_today }} · 30д: +{{ stats.users.new_30d }}</div>
+        </div>
+        <div class="stat-card purple">
+            <div class="stat-value">{{ stats.users.trial_used }}</div>
+            <div class="stat-label">Использовали trial</div>
+        </div>
+    </div>
+</section>
+
+<section class="dashboard-section">
+    <div class="section-title">💰 Финансы</div>
+    <div class="stats-grid">
+        <div class="stat-card green">
+            <div class="stat-value">{{ stats.finance.revenue_total }} ₽</div>
+            <div class="stat-label">Выручка (всего)</div>
+            <div class="stat-sub">30д: {{ stats.finance.revenue_30d }} ₽ · 7д: {{ stats.finance.revenue_7d }} ₽</div>
+        </div>
+        <div class="stat-card blue">
+            <div class="stat-value">{{ stats.finance.revenue_today }} ₽</div>
+            <div class="stat-label">Выручка сегодня</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ stats.finance.deposits_total }} ₽</div>
+            <div class="stat-label">Пополнения баланса</div>
+            <div class="stat-sub">30д: {{ stats.finance.deposits_30d }} ₽ · 7д: {{ stats.finance.deposits_7d }} ₽</div>
+        </div>
+        <div class="stat-card orange">
+            <div class="stat-value">{{ stats.finance.yookassa_total }} ₽</div>
+            <div class="stat-label">Через ЮKassa</div>
+            <div class="stat-sub">за 30д: {{ stats.finance.yookassa_30d }} ₽</div>
+        </div>
+        <div class="stat-card yellow">
+            <div class="stat-value">{{ stats.finance.user_balances }} ₽</div>
+            <div class="stat-label">На балансах пользователей</div>
+            <div class="stat-sub">обязательство сервиса</div>
+        </div>
+        <div class="stat-card red">
+            <div class="stat-value">{{ stats.finance.referral_paid }} ₽</div>
+            <div class="stat-label">Реферальные выплаты</div>
+            <div class="stat-sub">30д: {{ stats.finance.referral_paid_30d }} ₽</div>
+        </div>
+        <div class="stat-card purple">
+            <div class="stat-value">{{ stats.finance.promo_discounts }} ₽</div>
+            <div class="stat-label">Скидки по промокодам</div>
+            <div class="stat-sub">30д: {{ stats.finance.promo_discounts_30d }} ₽</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ stats.finance.arpu }} ₽</div>
+            <div class="stat-label">ARPU</div>
+            <div class="stat-sub">средняя выручка на платящего</div>
+        </div>
+        <div class="stat-card green">
+            <div class="stat-value">{{ stats.finance.net_after_referrals }} ₽</div>
+            <div class="stat-label">Чистая выручка</div>
+            <div class="stat-sub">выручка − реферальные</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ stats.finance.succeeded_orders }}</div>
+            <div class="stat-label">Успешных платежей ЮKassa</div>
+            {% if stats.finance.pending_orders %}
+            <div class="stat-sub">ожидают: {{ stats.finance.pending_orders }} ({{ stats.finance.pending_orders_sum }} ₽)</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card card-wide" style="margin-top:20px;">
+        <h3>Финансовая сводка по периодам</h3>
+        <table class="metrics-table">
+            <thead>
+                <tr>
+                    <th>Показатель</th>
+                    <th>Сегодня</th>
+                    <th>7 дней</th>
+                    <th>30 дней</th>
+                    <th>Всего</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Выручка (подписки)</td>
+                    <td>{{ stats.finance.revenue_today }} ₽</td>
+                    <td>{{ stats.finance.revenue_7d }} ₽</td>
+                    <td>{{ stats.finance.revenue_30d }} ₽</td>
+                    <td><strong>{{ stats.finance.revenue_total }} ₽</strong></td>
+                </tr>
+                <tr>
+                    <td>Пополнения баланса</td>
+                    <td>{{ stats.finance.deposits_today }} ₽</td>
+                    <td>{{ stats.finance.deposits_7d }} ₽</td>
+                    <td>{{ stats.finance.deposits_30d }} ₽</td>
+                    <td><strong>{{ stats.finance.deposits_total }} ₽</strong></td>
+                </tr>
+                <tr>
+                    <td>Новые пользователи</td>
+                    <td>+{{ stats.users.new_today }}</td>
+                    <td>+{{ stats.users.new_7d }}</td>
+                    <td>+{{ stats.users.new_30d }}</td>
+                    <td>{{ stats.users.total }}</td>
+                </tr>
+                <tr>
+                    <td>Реферальные выплаты</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>{{ stats.finance.referral_paid_30d }} ₽</td>
+                    <td>{{ stats.finance.referral_paid }} ₽</td>
+                </tr>
+                <tr>
+                    <td>Корректировки админа (нетто)</td>
+                    <td colspan="3"></td>
+                    <td class="{% if stats.finance.admin_adjustments >= 0 %}amount-pos{% else %}amount-neg{% endif %}">
+                        {{ stats.finance.admin_adjustments }} ₽
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="dashboard-section">
+    <div class="section-title">📋 Подписки</div>
+    <div class="stats-grid">
+        <div class="stat-card green">
+            <div class="stat-value">{{ stats.subscriptions.active }}</div>
+            <div class="stat-label">Активных (всего)</div>
+            <div class="stat-sub">платных: {{ stats.subscriptions.paid_active }} · trial: {{ stats.subscriptions.trial }}</div>
+        </div>
+        <div class="stat-card red">
+            <div class="stat-value">{{ stats.subscriptions.expired }}</div>
+            <div class="stat-label">Истекших</div>
+        </div>
+        <div class="stat-card orange">
+            <div class="stat-value">{{ stats.subscriptions.suspended }}</div>
+            <div class="stat-label">Приостановленных</div>
+        </div>
+        <div class="stat-card blue">
+            <div class="stat-value">+{{ stats.subscriptions.new_7d }}</div>
+            <div class="stat-label">Новых за 7 дней</div>
+            <div class="stat-sub">30д: +{{ stats.subscriptions.new_30d }}</div>
+        </div>
+    </div>
+</section>
+
+<section class="dashboard-section two-col">
+    <div class="card">
+        <h3>📈 Выручка — 14 дней</h3>
+        <div class="chart-wrap">
+            {% for bar in stats.charts.revenue %}
+            <div class="chart-bar-col" title="{{ bar.label }}: {{ bar.amount }} ₽">
+                <div class="chart-value">{% if bar.amount %}{{ bar.amount }}{% endif %}</div>
+                <div class="chart-bar" style="height: {{ bar.pct }}%;"></div>
+                <div class="chart-label">{{ bar.date }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="card">
+        <h3>👤 Регистрации — 14 дней</h3>
+        <div class="chart-wrap">
+            {% for bar in stats.charts.users %}
+            <div class="chart-bar-col" title="{{ bar.label }}: {{ bar.count }}">
+                <div class="chart-value">{% if bar.count %}{{ bar.count }}{% endif %}</div>
+                <div class="chart-bar users" style="height: {{ bar.pct }}%;"></div>
+                <div class="chart-label">{{ bar.date }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+<section class="dashboard-section two-col">
+    <div class="card">
+        <h3>💎 Активные подписки по тарифам</h3>
+        {% if stats.subscriptions.by_plan %}
+        <table>
+            <thead>
+                <tr><th>Тариф</th><th>Цена</th><th>Активных</th></tr>
+            </thead>
+            <tbody>
+                {% for item in stats.subscriptions.by_plan %}
+                <tr>
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.price }} ₽</td>
+                    <td><strong>{{ item.count }}</strong></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">Нет активных платных подписок с тарифом</p>
+        {% endif %}
+    </div>
+    <div class="card">
+        <h3>⚙️ Инфраструктура и прочее</h3>
+        <dl class="info-list">
+            <dt>🌍 Серверов</dt><dd>{{ stats.infrastructure.active_servers }}</dd>
+            <dt>📊 Трафик</dt><dd>{{ stats.infrastructure.traffic_gb }} GB</dd>
+            <dt>🎁 Рефералов</dt><dd>{{ stats.infrastructure.referrals }}</dd>
+            <dt>🎟 Промокодов</dt><dd>{{ stats.promo.active_codes }} активных</dd>
+            <dt>🎟 Использований</dt><dd>{{ stats.promo.redemptions }}</dd>
+        </dl>
+    </div>
+</section>
+
+<section class="dashboard-section">
+    <div class="section-title">📜 Последние операции</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th>Пользователь</th>
+                <th>Тип</th>
+                <th>Сумма</th>
+                <th>Баланс после</th>
+                <th>Описание</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tx in stats.recent_transactions %}
+            <tr>
+                <td>{{ tx.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                <td><a href="/users/{{ tx.user_id }}" class="user-link">{{ tx.user_name }}</a></td>
+                <td>{{ tx.type }}</td>
+                <td class="{% if tx.amount >= 0 %}amount-pos{% else %}amount-neg{% endif %}">
+                    {% if tx.amount >= 0 %}+{% endif %}{{ tx.amount }} ₽
+                </td>
+                <td>{{ tx.balance_after }} ₽</td>
+                <td>{{ tx.description or '—' }}</td>
+            </tr>
+            {% endfor %}
+            {% if not stats.recent_transactions %}
+            <tr><td colspan="6" style="text-align:center;color:#8b949e;">Операций пока нет</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</section>
 {% endblock %}

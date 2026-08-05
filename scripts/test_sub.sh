@@ -2,7 +2,7 @@
 systemctl restart qooq-api
 sleep 2
 TOKEN=$(sudo -u postgres psql -d qooq_vpn -t -c "SELECT subscription_token FROM subscriptions ORDER BY id DESC LIMIT 1;" | tr -d ' ')
-UUID=$(sudo -u postgres psql -d qooq_vpn -t -c "SELECT client_uuid FROM users ORDER BY id DESC LIMIT 1;" | tr -d ' ')
+UUID=$(sudo -u postgres psql -d qooq_vpn -t -c "SELECT client_uuid FROM subscriptions ORDER BY id DESC LIMIT 1;" | tr -d ' ')
 echo "TOKEN=$TOKEN"
 echo "UUID=$UUID"
 echo "=== /sub/{token} ==="

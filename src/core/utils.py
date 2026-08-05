@@ -51,3 +51,17 @@ def format_duration_until(expires_at: datetime) -> str:
 
 def format_datetime_ru(dt: datetime) -> str:
     return dt.strftime("%d.%m.%Y %H:%M")
+
+
+def bytes_to_gb(value: int) -> float:
+    return round(value / (1024**3), 2)
+
+
+def format_bytes(value: int) -> str:
+    if value >= 1024**3:
+        return f"{bytes_to_gb(value):.2f} GB"
+    if value >= 1024**2:
+        return f"{value / (1024**2):.1f} MB"
+    if value >= 1024:
+        return f"{value / 1024:.1f} KB"
+    return f"{value} B"

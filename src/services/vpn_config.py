@@ -206,5 +206,16 @@ def build_vless_subscription_payload(client_uuid: uuid.UUID, remark: str = DEFAU
     return base64.b64encode(body.encode("utf-8")).decode("ascii")
 
 
+def build_multi_vless_subscription_payload(
+    links: list[tuple[uuid.UUID, str]],
+) -> str:
+    body = "".join(build_vless_link(client_uuid, remark) + "\n" for client_uuid, remark in links)
+    return base64.b64encode(body.encode("utf-8")).decode("ascii")
+
+
+def build_multi_vless_links_text(links: list[tuple[uuid.UUID, str]]) -> str:
+    return "".join(build_vless_link(client_uuid, remark) + "\n" for client_uuid, remark in links)
+
+
 def build_xray_subscription_payload(client_uuid: uuid.UUID, remark: str = DEFAULT_REMARK) -> str:
     return build_subscription_payload(client_uuid, remark)

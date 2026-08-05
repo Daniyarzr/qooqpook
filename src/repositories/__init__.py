@@ -4,7 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from src.core.enums import SubscriptionStatus
 from src.core.utils import generate_referral_code, utcnow
-from src.models import Subscription, SubscriptionPlan, Transaction, User, VpnServer
+from src.models import PaymentOrder, Subscription, SubscriptionPlan, Transaction, User, VpnServer
 
 
 class UserRepository:
@@ -75,7 +75,12 @@ class SubscriptionRepository:
     async def get_by_token(self, token: str) -> Subscription | None:
         result = await self.session.execute(
             select(Subscription)
-            .options(selectinload(Subscription.user), selectinload(Subscription.config))
+            .options(
+                selectinload(Subscription.user),
+                selectinload(Subscription.config),
+                selectinload(Subscription.plan),
+                selectinload(Subscription.devices),
+            )
             .where(Subscription.subscription_token == token)
         )
         return result.scalar_one_or_none()
@@ -105,6 +110,50 @@ class SubscriptionRepository:
             .where(Subscription.expires_at > utcnow())
         )
         return list(result.scalars().all())
+
+    async def get_manageable_by_user(self, user_id: int) -> Subscription | None:
+        """Active, trial, or device-limit suspended subscription."""
+        result = await self.session.execute(
+            select(Subscription)
+            .where(Subscription.user_id == user_id)
+            .where(
+                Subscription.status.in_(
+                    [
+                        SubscriptionStatus.ACTIVE,
+                        SubscriptionStatus.TRIAL,
+                        SubscriptionStatus.SUSPENDED,
+                    ]
+                )
+            )
+            .order_by(Subscription.expires_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_current_by_user(self, user_id: int) -> Subscription | None:
+        """Latest subscription including suspended (for bot UI)."""
+        result = await self.session.execute(
+            select(Subscription)
+            .options(selectinload(Subscription.devices))
+            .where(Subscription.user_id == user_id)
+            .where(
+                Subscription.status.in_(
+                    [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL, SubscriptionStatus.SUSPENDED]
+                )
+            )
+            .order_by(Subscription.expires_at.desc())
+            .limit(1)
+        )
+        sub = result.scalar_one_or_none()
+        if sub and sub.expires_at <= utcnow() and sub.status != SubscriptionStatus.SUSPENDED:
+            sub.status = SubscriptionStatus.EXPIRED
+            await self.session.flush()
+            return None
+        return sub
+
+    async def delete(self, subscription: Subscription) -> None:
+        await self.session.delete(subscription)
+        await self.session.flush()
 
 
 class PlanRepository:
@@ -156,3 +205,25 @@ class ServerRepository:
             .order_by(VpnServer.sort_order, VpnServer.name)
         )
         return list(result.scalars().all())
+
+
+class PaymentOrderRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(self, order: PaymentOrder) -> PaymentOrder:
+        self.session.add(order)
+        await self.session.flush()
+        return order
+
+    async def get_by_id(self, order_id: int) -> PaymentOrder | None:
+        result = await self.session.execute(
+            select(PaymentOrder).where(PaymentOrder.id == order_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_external_id(self, external_id: str) -> PaymentOrder | None:
+        result = await self.session.execute(
+            select(PaymentOrder).where(PaymentOrder.external_id == external_id)
+        )
+        return result.scalar_one_or_none()

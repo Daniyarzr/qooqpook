@@ -36,6 +36,7 @@ class SubscriptionRead(BaseModel):
     id: int
     status: SubscriptionStatus
     subscription_token: str
+    client_uuid: UUID
     started_at: datetime
     expires_at: datetime
     is_trial: bool

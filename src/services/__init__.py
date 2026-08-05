@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid as uuid_std
 from datetime import timedelta
 from decimal import Decimal
 
@@ -13,13 +14,14 @@ from src.core.utils import (
     generate_subscription_token,
     utcnow,
 )
-from src.models import ReferralReward, Subscription, Transaction
+from src.models import Subscription, Transaction
 from src.repositories import (
     PlanRepository,
     SubscriptionRepository,
     TransactionRepository,
     UserRepository,
 )
+from src.services.devices import DeviceRepository, DeviceService
 from src.services.xray_sync import XrayClient, sync_active_clients
 
 logger = logging.getLogger(__name__)
@@ -48,12 +50,15 @@ class SubscriptionService:
             user_id=user_id,
             status=SubscriptionStatus.TRIAL,
             subscription_token=generate_subscription_token(),
+            client_uuid=uuid_std.uuid4(),
             started_at=now,
             expires_at=now + timedelta(days=self.settings.trial_days),
             is_trial=True,
         )
         user.trial_used = True
         await self.subscriptions.create(subscription)
+        device_service = DeviceService(self.session, self.settings)
+        await device_service.ensure_default_device(subscription)
         await self.sync_xray_clients()
         return subscription
 
@@ -62,6 +67,7 @@ class SubscriptionService:
         user_id: int,
         plan_id: int,
         payment_method: PaymentMethod = PaymentMethod.BALANCE,
+        promo_code_id: int | None = None,
     ) -> Subscription:
         user = await self.users.get_by_id(user_id)
         plan = await self.plans.get_by_id(plan_id)
@@ -70,18 +76,28 @@ class SubscriptionService:
         if not plan.is_active:
             raise ValueError("Plan is not active")
 
+        from src.services.pricing import PurchasePricingService
+        from src.services.promo import PromoCodeService
+        from src.services.referral import ReferralService
+
+        pricing = await PurchasePricingService(self.session, self.settings).resolve(
+            user_id, plan, promo_code_id
+        )
+        price = pricing.final_price
+
         if payment_method == PaymentMethod.BALANCE:
-            if user.balance < plan.price:
+            if user.balance < price:
                 raise ValueError("Insufficient balance")
-            new_balance = user.balance - plan.price
+            new_balance = user.balance - price
             await self.users.update_balance(user, new_balance)
+            description = f"Оплата подписки: {plan.name}{pricing.description_suffix}"
             await self.transactions.create(
                 Transaction(
                     user_id=user.id,
                     type=TransactionType.SUBSCRIPTION_PAYMENT,
-                    amount=-plan.price,
+                    amount=-price,
                     balance_after=new_balance,
-                    description=f"Оплата подписки: {plan.name}",
+                    description=description,
                     payment_method=payment_method,
                 )
             )
@@ -89,64 +105,42 @@ class SubscriptionService:
         existing = await self.subscriptions.get_active_by_user(user_id)
         now = utcnow()
 
+        referral_service = ReferralService(self.session, self.settings)
+        if pricing.referral:
+            await referral_service.mark_welcome_used(user, pricing.referral)
+
         if existing:
             existing.expires_at = extend_expiry(existing.expires_at, plan.days)
             existing.status = SubscriptionStatus.ACTIVE
             existing.is_trial = False
             existing.plan_id = plan.id
             await self.subscriptions.update(existing)
-            await self._process_referral_bonus(user.id, plan.price)
-            await self.sync_xray_clients()
-            return existing
+            subscription = existing
+        else:
+            subscription = Subscription(
+                user_id=user_id,
+                plan_id=plan.id,
+                status=SubscriptionStatus.ACTIVE,
+                subscription_token=generate_subscription_token(),
+                client_uuid=uuid_std.uuid4(),
+                started_at=now,
+                expires_at=extend_expiry(now, plan.days),
+                is_trial=False,
+            )
+            await self.subscriptions.create(subscription)
+            device_service = DeviceService(self.session, self.settings)
+            await device_service.ensure_default_device(subscription)
 
-        subscription = Subscription(
-            user_id=user_id,
-            plan_id=plan.id,
-            status=SubscriptionStatus.ACTIVE,
-            subscription_token=generate_subscription_token(),
-            started_at=now,
-            expires_at=extend_expiry(now, plan.days),
-            is_trial=False,
-        )
-        await self.subscriptions.create(subscription)
-        await self._process_referral_bonus(user.id, plan.price)
+        if pricing.promo:
+            await PromoCodeService(self.session).redeem(
+                pricing.promo.promo,
+                user_id,
+                subscription.id,
+                pricing.promo,
+            )
+
         await self.sync_xray_clients()
         return subscription
-
-    async def _process_referral_bonus(self, user_id: int, plan_price: Decimal) -> None:
-        user = await self.users.get_by_id(user_id)
-        if not user or not user.referred_by_id:
-            return
-
-        referrer = await self.users.get_by_id(user.referred_by_id)
-        if not referrer:
-            return
-
-        bonus = plan_price * Decimal(self.settings.referral_bonus_percent) / Decimal(100)
-        if bonus <= 0:
-            return
-
-        new_balance = referrer.balance + bonus
-        await self.users.update_balance(referrer, new_balance)
-        await self.transactions.create(
-            Transaction(
-                user_id=referrer.id,
-                type=TransactionType.REFERRAL_BONUS,
-                amount=bonus,
-                balance_after=new_balance,
-                description=f"Реферальный бонус от пользователя #{user.id}",
-                payment_method=PaymentMethod.BALANCE,
-            )
-        )
-        self.session.add(
-            ReferralReward(
-                referrer_id=referrer.id,
-                referred_id=user.id,
-                bonus_amount=bonus,
-                bonus_days=self.settings.referral_bonus_days,
-                is_paid=True,
-            )
-        )
 
     async def suspend_expired(self) -> int:
         expired = await self.subscriptions.get_expired_active()
@@ -162,10 +156,16 @@ class SubscriptionService:
             return False
 
         active = await self.subscriptions.get_active_with_users()
+        device_repo = DeviceRepository(self.session)
+        all_devices = await device_repo.get_all_for_active_subscriptions()
         clients = [
-            XrayClient(user_id=sub.user_id, client_uuid=sub.user.client_uuid)
-            for sub in active
-            if sub.user
+            XrayClient(
+                user_id=device.subscription.user_id,
+                device_id=device.id,
+                client_uuid=device.client_uuid,
+            )
+            for device in all_devices
+            if device.subscription
         ]
         return await asyncio.to_thread(sync_active_clients, self.settings, clients)
 
@@ -204,13 +204,25 @@ class SubscriptionService:
         from src.services.vpn_config import build_vless_link, sanitize_remark
 
         configs = []
-        if subscription.user:
+        devices = list(subscription.devices) if subscription.devices else []
+        user_label = (
+            subscription.user.first_name or subscription.user.id
+            if subscription.user
+            else subscription.user_id
+        )
+        if devices:
+            for device in devices:
+                configs.append(
+                    build_vless_link(
+                        device.client_uuid,
+                        sanitize_remark(f"QooQ VPN {user_label} {device.name}"),
+                    )
+                )
+        else:
             configs.append(
                 build_vless_link(
-                    subscription.user.client_uuid,
-                    sanitize_remark(
-                        f"QooQ VPN {subscription.user.first_name or subscription.user.id}"
-                    ),
+                    subscription.client_uuid,
+                    sanitize_remark(f"QooQ VPN {user_label}"),
                 )
             )
 

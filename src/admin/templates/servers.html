@@ -1,7 +1,43 @@
 {% extends "base.html" %}
 {% block title %}Серверы{% endblock %}
 {% block content %}
-<h2>🌍 VPN Серверы</h2>
+<div class="page-header">
+    <h2>🌍 VPN Серверы</h2>
+</div>
+
+{% if error %}
+<p class="muted" style="color:#e74c3c;margin-bottom:16px;">⚠️ {{ error }}</p>
+{% endif %}
+{% if success == 'created' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Сервер добавлен</p>
+{% elif success == 'deleted' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Сервер удалён</p>
+{% endif %}
+
+<section class="card" style="margin-bottom:24px;">
+    <h3>➕ Добавить сервер</h3>
+    <form method="post" action="/servers/create" class="inline-form" style="flex-direction:column;align-items:stretch;">
+        <div class="inline-form">
+            <input type="text" name="name" placeholder="Название" class="input-sm" required>
+            <input type="text" name="country" placeholder="Страна" class="input-sm" required>
+            <input type="text" name="country_flag" placeholder="🇩🇪" class="input-sm" value="🌍" maxlength="8">
+            <input type="text" name="host" placeholder="Хост / IP" class="input-sm" required>
+        </div>
+        <div class="inline-form">
+            <input type="number" name="port" placeholder="Порт" class="input-sm" value="443" min="1" max="65535" required>
+            <input type="text" name="protocol" placeholder="Протокол" class="input-sm" value="vless">
+            <input type="number" name="max_users" placeholder="Макс. пользователей" class="input-sm" value="50" min="1" required>
+            <input type="number" name="sort_order" placeholder="Порядок" class="input-sm" value="0">
+            <select name="status" class="input-sm">
+                <option value="online">Online</option>
+                <option value="offline">Offline</option>
+                <option value="maintenance">Maintenance</option>
+            </select>
+            <button type="submit" class="btn-sm btn-success">Добавить</button>
+        </div>
+    </form>
+</section>
+
 <table>
     <thead>
         <tr>
@@ -10,32 +46,62 @@
             <th>Страна</th>
             <th>Хост</th>
             <th>Порт</th>
-            <th>Протокол</th>
-            <th>Пользователей</th>
+            <th>Подключено</th>
+            <th>Нагрузка</th>
             <th>Статус</th>
+            <th></th>
         </tr>
     </thead>
     <tbody>
-        {% for server in servers %}
+        {% for row in server_rows %}
+        {% set server = row.server %}
+        {% set stats = row.stats %}
         <tr>
             <td>{{ server.id }}</td>
-            <td>{{ server.country_flag }} {{ server.name }}</td>
+            <td>
+                <a href="/servers/{{ server.id }}" class="user-link">
+                    {{ server.country_flag }} {{ server.name }}
+                </a>
+            </td>
             <td>{{ server.country }}</td>
-            <td>{{ server.host }}</td>
+            <td><code>{{ server.host }}</code></td>
             <td>{{ server.port }}</td>
-            <td>{{ server.protocol }}</td>
-            <td>{{ server.current_users }}/{{ server.max_users }}</td>
+            <td>
+                <strong>{{ stats.connected_users }}</strong> / {{ server.max_users }}
+                <div class="muted">{{ stats.devices_count }} устройств</div>
+            </td>
+            <td>
+                <div class="progress-wrap" style="width:80px;display:inline-block;vertical-align:middle;">
+                    <div class="progress-bar {% if stats.load_percent >= 90 %}load-high{% endif %}"
+                         style="width: {{ stats.load_percent }}%;"></div>
+                </div>
+                {{ stats.load_percent }}%
+            </td>
             <td>
                 {% if server.status.value == 'online' %}
                 <span class="badge badge-green">Online</span>
+                {% elif server.status.value == 'maintenance' %}
+                <span class="badge badge-red">Maint.</span>
                 {% else %}
                 <span class="badge badge-red">{{ server.status.value }}</span>
                 {% endif %}
+                {% if not server.is_active %}
+                <span class="badge badge-red">off</span>
+                {% endif %}
+            </td>
+            <td>
+                <div class="actions">
+                    <a href="/servers/{{ server.id }}" class="btn-sm btn-success" style="text-decoration:none;display:inline-block;">Детали</a>
+                    <form method="post" action="/servers/{{ server.id }}/delete"
+                          onsubmit="return confirm('Удалить сервер {{ server.name }}?');">
+                        <button type="submit" class="btn-sm btn-danger">Удалить</button>
+                    </form>
+                </div>
             </td>
         </tr>
         {% endfor %}
-        {% if not servers %}
-        <tr><td colspan="8" style="text-align:center;color:#8b949e;">Серверы не настроены.</td></tr>
+        {% if not server_rows %}
+        <tr><td colspan="9" style="text-align:center;color:#8b949e;">Серверы не настроены</td></tr>
         {% endif %}
     </tbody>
 </table>

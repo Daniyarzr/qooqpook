@@ -20,7 +20,12 @@ QOOQ_EMAIL_PREFIX = "qooq-"
 @dataclass(frozen=True)
 class XrayClient:
     user_id: int
+    device_id: int
     client_uuid: uuid.UUID
+
+    @property
+    def email(self) -> str:
+        return f"{QOOQ_EMAIL_PREFIX}{self.user_id}-d{self.device_id}"
 
 
 class XraySyncService:
@@ -136,7 +141,8 @@ class XraySyncService:
         for item in active_clients:
             entry = {
                 "id": str(item.client_uuid),
-                "email": f"{QOOQ_EMAIL_PREFIX}{item.user_id}",
+                "email": item.email,
+                "level": 0,
             }
             if uses_reality:
                 entry["flow"] = "xtls-rprx-vision"
@@ -144,7 +150,18 @@ class XraySyncService:
 
         settings["clients"] = preserved + managed
         inbound["settings"] = settings
+        self._ensure_stats_policy(config)
         return config
+
+    def _ensure_stats_policy(self, config: dict) -> None:
+        policy = config.setdefault("policy", {})
+        levels = policy.setdefault("levels", {})
+        level0 = levels.setdefault("0", {})
+        level0["statsUserUplink"] = True
+        level0["statsUserDownlink"] = True
+        system = policy.setdefault("system", {})
+        system["statsInboundUplink"] = True
+        system["statsInboundDownlink"] = True
 
     def _find_inbound(self, config: dict) -> dict | None:
         for inbound in config.get("inbounds", []):

@@ -8,15 +8,16 @@ from src.bot.texts.messages import BALANCE, BALANCE_HISTORY_HEADER, BALANCE_HIST
 from src.core.config import Settings
 from src.core.enums import TransactionType
 from src.core.utils import build_referral_link, format_datetime_ru
-from src.models import ReferralReward, User
 from src.repositories import UserRepository
-from src.services import BalanceService
+from src.services import BalanceService, SubscriptionService
+from src.services.devices import DeviceService
+from src.services.system_settings import SystemSettingsService
 
 router = Router(name="profile")
 
 
 @router.callback_query(F.data == "profile")
-async def show_profile(callback: CallbackQuery, session: AsyncSession):
+async def show_profile(callback: CallbackQuery, session: AsyncSession, settings: Settings):
     repo = UserRepository(session)
     user = await repo.get_by_telegram_id(callback.from_user.id)
     if not user:
@@ -28,9 +29,20 @@ async def show_profile(callback: CallbackQuery, session: AsyncSession):
     )
     referrals_count = result.scalar() or 0
 
+    sub_service = SubscriptionService(session, settings)
+    subscription = await sub_service.get_user_subscription(user.id)
+    subscription_uuid = "—"
+    if subscription:
+        device_service = DeviceService(session, settings)
+        devices = await device_service.list_devices(subscription.id)
+        if devices:
+            subscription_uuid = str(devices[0].client_uuid)
+        else:
+            subscription_uuid = str(subscription.client_uuid)
+
     text = PROFILE.format(
         telegram_id=user.telegram_id,
-        uuid=str(user.client_uuid),
+        uuid=subscription_uuid,
         balance=user.balance,
         referral_code=user.referral_code,
         referrals_count=referrals_count,
@@ -41,7 +53,7 @@ async def show_profile(callback: CallbackQuery, session: AsyncSession):
 
 
 @router.callback_query(F.data == "balance")
-async def show_balance(callback: CallbackQuery, session: AsyncSession):
+async def show_balance(callback: CallbackQuery, session: AsyncSession, settings: Settings):
     repo = UserRepository(session)
     user = await repo.get_by_telegram_id(callback.from_user.id)
     if not user:
@@ -49,12 +61,16 @@ async def show_balance(callback: CallbackQuery, session: AsyncSession):
         return
 
     text = BALANCE.format(balance=user.balance)
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=balance_menu())
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=balance_menu(settings.yookassa_enabled),
+    )
     await callback.answer()
 
 
 @router.callback_query(F.data == "balance:history")
-async def show_balance_history(callback: CallbackQuery, session: AsyncSession):
+async def show_balance_history(callback: CallbackQuery, session: AsyncSession, settings: Settings):
     repo = UserRepository(session)
     user = await repo.get_by_telegram_id(callback.from_user.id)
     if not user:
@@ -85,7 +101,9 @@ async def show_balance_history(callback: CallbackQuery, session: AsyncSession):
                 date=format_datetime_ru(tx.created_at),
             )
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=balance_menu())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=balance_menu(settings.yookassa_enabled)
+    )
     await callback.answer()
 
 
@@ -102,20 +120,20 @@ async def show_referral(callback: CallbackQuery, session: AsyncSession, settings
     )
     referrals_count = result.scalar() or 0
 
-    earned_result = await session.execute(
-        select(func.coalesce(func.sum(ReferralReward.bonus_amount), 0)).where(
-            ReferralReward.referrer_id == user.id
-        )
+    settings_service = SystemSettingsService(session, settings)
+    discount_percent = await settings_service.get_referral_discount_percent()
+    welcome = bool(user.referred_by_id and not user.referral_discount_used)
+    current_discount = min(
+        100,
+        referrals_count * discount_percent + (discount_percent if welcome else 0),
     )
-    earned = earned_result.scalar() or 0
 
     referral_link = build_referral_link(settings.bot_username, user.referral_code)
     text = REFERRAL.format(
         referral_link=referral_link,
-        bonus_percent=settings.referral_bonus_percent,
-        bonus_days=settings.referral_bonus_days,
+        discount_percent=discount_percent,
         referrals_count=referrals_count,
-        earned=earned,
+        current_discount=current_discount,
     )
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_to_menu())
     await callback.answer()

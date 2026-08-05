@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Сервер {{ server.name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <a href="/servers" class="back-link">← К списку серверов</a>
+    <h2>{{ server.country_flag }} {{ server.name }}</h2>
+</div>
+
+{% if error %}
+<p class="muted" style="color:#e74c3c;margin-bottom:16px;">⚠️ {{ error }}</p>
+{% endif %}
+{% if success %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Настройки сервера сохранены</p>
+{% endif %}
+
+<section class="card" style="margin-bottom:20px;max-width:720px;">
+    <h3>🖥 Рекомендуемая ёмкость</h3>
+    <p class="muted">
+        {{ server.host }} — <b>{{ capacity_hint.ram_mb }} MB RAM</b> (фактически на VPS), <b>{{ capacity_hint.cpus }} vCPU</b>.
+        {{ capacity_hint.note }}.
+        Безопасный лимит: <b>{{ capacity_hint.recommended_max }} пользователей</b>
+        (~10–12 MB RAM на активного пользователя Xray поверх системных сервисов).
+    </p>
+</section>
+
+<section class="card" style="margin-bottom:24px;max-width:720px;">
+    <h3>✏️ Редактировать сервер</h3>
+    <form method="post" action="/servers/{{ server.id }}/update" class="inline-form" style="flex-direction:column;align-items:stretch;">
+        <div class="inline-form">
+            <input type="text" name="name" value="{{ server.name }}" class="input-sm" required>
+            <input type="text" name="country" value="{{ server.country }}" class="input-sm" required>
+            <input type="text" name="country_flag" value="{{ server.country_flag }}" class="input-sm" maxlength="8">
+        </div>
+        <div class="inline-form">
+            <input type="text" name="host" value="{{ server.host }}" class="input-sm" required>
+            <input type="number" name="port" value="{{ server.port }}" class="input-sm" min="1" max="65535" required>
+            <input type="text" name="protocol" value="{{ server.protocol }}" class="input-sm">
+            <input type="number" name="max_users" value="{{ server.max_users }}" class="input-sm" min="1" required title="Макс. пользователей">
+        </div>
+        <div class="inline-form">
+            <input type="number" name="sort_order" value="{{ server.sort_order }}" class="input-sm">
+            <select name="status" class="input-sm">
+                <option value="online" {% if server.status.value == 'online' %}selected{% endif %}>Online</option>
+                <option value="offline" {% if server.status.value == 'offline' %}selected{% endif %}>Offline</option>
+                <option value="maintenance" {% if server.status.value == 'maintenance' %}selected{% endif %}>Maintenance</option>
+            </select>
+            <label class="muted" style="display:flex;align-items:center;gap:6px;">
+                <input type="checkbox" name="is_active" value="true" {% if server.is_active %}checked{% endif %}>
+                Активен
+            </label>
+            <button type="submit" class="btn-sm btn-success">Сохранить</button>
+        </div>
+    </form>
+</section>
+
+<div class="detail-grid">
+    <section class="card">
+        <h3>Информация</h3>
+        <dl class="info-list">
+            <dt>ID</dt><dd>{{ server.id }}</dd>
+            <dt>Страна</dt><dd>{{ server.country }}</dd>
+            <dt>Хост</dt><dd><code>{{ server.host }}</code></dd>
+            <dt>Порт</dt><dd>{{ server.port }}</dd>
+            <dt>Протокол</dt><dd>{{ server.protocol }}</dd>
+            <dt>Статус</dt>
+            <dd>
+                {% if server.status.value == 'online' %}
+                <span class="badge badge-green">Online</span>
+                {% else %}
+                <span class="badge badge-red">{{ server.status.value }}</span>
+                {% endif %}
+            </dd>
+            <dt>Активен</dt><dd>{{ 'да' if server.is_active else 'нет' }}</dd>
+            <dt>Порядок</dt><dd>{{ server.sort_order }}</dd>
+            <dt>Создан</dt><dd>{{ server.created_at.strftime('%d.%m.%Y %H:%M') }}</dd>
+        </dl>
+    </section>
+
+    <section class="card">
+        <h3>📊 Нагрузка</h3>
+        <div class="traffic-stats">
+            <div class="traffic-stat highlight">
+                <div class="traffic-value">{{ stats.connected_users }}</div>
+                <div class="traffic-label">Пользователей</div>
+                <div class="traffic-sub">из {{ server.max_users }}</div>
+            </div>
+            <div class="traffic-stat">
+                <div class="traffic-value">{{ stats.devices_count }}</div>
+                <div class="traffic-label">Устройств</div>
+            </div>
+            <div class="traffic-stat">
+                <div class="traffic-value">{{ stats.subscriptions_count }}</div>
+                <div class="traffic-label">Подписок</div>
+            </div>
+            <div class="traffic-stat">
+                <div class="traffic-value">{{ stats.slots_free }}</div>
+                <div class="traffic-label">Свободно слотов</div>
+            </div>
+        </div>
+
+        <div class="progress-wrap" style="margin-top:16px;">
+            <div class="progress-bar {% if stats.load_percent >= 90 %}load-high{% endif %}"
+                 style="width: {{ stats.load_percent }}%;"></div>
+        </div>
+        <p class="muted">Загрузка: <strong>{{ stats.load_percent }}%</strong></p>
+        {% if stats.includes_unassigned %}
+        <p class="muted">* Включая пользователей без явной привязки к серверу (основной узел)</p>
+        {% endif %}
+    </section>
+
+    <section class="card card-wide">
+        <h3>📈 Трафик пользователей на сервере</h3>
+        <div class="traffic-stats">
+            <div class="traffic-stat">
+                <div class="traffic-value">{{ stats.upload_gb }} GB</div>
+                <div class="traffic-label">↑ Upload</div>
+                <div class="traffic-sub">{{ stats.upload_human }}</div>
+            </div>
+            <div class="traffic-stat">
+                <div class="traffic-value">{{ stats.download_gb }} GB</div>
+                <div class="traffic-label">↓ Download</div>
+                <div class="traffic-sub">{{ stats.download_human }}</div>
+            </div>
+            <div class="traffic-stat highlight">
+                <div class="traffic-value">{{ stats.total_traffic_gb }} GB</div>
+                <div class="traffic-label">Всего</div>
+                <div class="traffic-sub">{{ stats.total_traffic_human }}</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="card card-wide">
+        <h3>⚙️ Конфигурации</h3>
+        {% if server.configs %}
+        <table>
+            <thead>
+                <tr><th>ID</th><th>Название</th><th>Inbound</th><th>Активен</th></tr>
+            </thead>
+            <tbody>
+                {% for config in server.configs %}
+                <tr>
+                    <td>{{ config.id }}</td>
+                    <td>{{ config.name }}</td>
+                    <td>{{ config.inbound_id or '—' }}</td>
+                    <td>
+                        {% if config.is_active %}
+                        <span class="badge badge-green">Да</span>
+                        {% else %}
+                        <span class="badge badge-red">Нет</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">Конфигураций нет</p>
+        {% endif %}
+    </section>
+</div>
+
+<div class="section-actions" style="margin-top:24px;">
+    <form method="post" action="/servers/{{ server.id }}/delete"
+          onsubmit="return confirm('Удалить сервер {{ server.name }}?');">
+        <button type="submit" class="btn-sm btn-danger">🗑 Удалить сервер</button>
+    </form>
+</div>
+{% endblock %}

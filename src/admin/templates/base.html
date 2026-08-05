@@ -95,8 +95,60 @@
         }
         .btn-danger { background: #da3633; }
         .btn-success { background: #238636; }
+        .btn-warning { background: #9e6a03; }
+        .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+        code { font-size: 12px; }
         .logout { margin-top: auto; padding: 24px; }
         .logout a { color: #f85149; text-decoration: none; font-size: 14px; }
+        .page-header { margin-bottom: 24px; }
+        .back-link { color: #58a6ff; text-decoration: none; font-size: 14px; display: inline-block; margin-bottom: 8px; }
+        .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
+        .card-wide { grid-column: 1 / -1; }
+        .card h3 { font-size: 16px; margin-bottom: 16px; color: #f0f6fc; }
+        .sub-heading { font-size: 13px; margin: 16px 0 8px; color: #8b949e; }
+        .info-list { display: grid; grid-template-columns: 120px 1fr; gap: 8px 12px; font-size: 14px; }
+        .info-list dt { color: #8b949e; }
+        .info-list dd { margin: 0; word-break: break-all; }
+        .section-actions { margin-top: 16px; }
+        .inline-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+        .input-sm { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e1e4e8; padding: 6px 10px; font-size: 13px; }
+        .muted { color: #8b949e; font-size: 13px; margin-top: 8px; }
+        .link { color: #58a6ff; word-break: break-all; }
+        .user-link { color: #58a6ff; text-decoration: none; }
+        .user-link:hover { text-decoration: underline; }
+        .card-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .card-header-row h3 { margin-bottom: 0; }
+        .traffic-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; }
+        .traffic-stat { background: #0d1117; border: 1px solid #21262d; border-radius: 10px; padding: 16px; text-align: center; }
+        .traffic-stat.highlight { border-color: rgba(88, 166, 255, 0.4); }
+        .traffic-value { font-size: 22px; font-weight: 700; color: #f0f6fc; }
+        .traffic-label { font-size: 12px; color: #8b949e; margin-top: 4px; }
+        .traffic-sub { font-size: 11px; color: #6e7681; margin-top: 2px; }
+        .progress-wrap { background: #21262d; border-radius: 8px; height: 8px; margin: 12px 0 4px; overflow: hidden; }
+        .progress-bar { background: linear-gradient(90deg, #238636, #58a6ff); height: 100%; border-radius: 8px; max-width: 100%; }
+        .progress-bar.load-high { background: linear-gradient(90deg, #9e6a03, #da3633); }
+        .dashboard-section { margin-bottom: 32px; }
+        .section-title { font-size: 16px; font-weight: 600; color: #f0f6fc; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid #21262d; }
+        .stat-card.orange { border-color: rgba(243, 156, 18, 0.3); }
+        .stat-card.yellow { border-color: rgba(241, 196, 15, 0.3); }
+        .stat-card.purple { border-color: rgba(155, 89, 182, 0.3); }
+        .stat-sub { font-size: 11px; color: #6e7681; margin-top: 6px; }
+        .metrics-table { margin-top: 0; }
+        .metrics-table td, .metrics-table th { text-align: right; }
+        .metrics-table td:first-child, .metrics-table th:first-child { text-align: left; }
+        .chart-wrap { display: flex; align-items: flex-end; gap: 6px; height: 120px; padding-top: 8px; }
+        .chart-bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; justify-content: flex-end; }
+        .chart-bar { width: 100%; max-width: 36px; background: linear-gradient(180deg, #58a6ff, #238636); border-radius: 4px 4px 0 0; min-height: 2px; }
+        .chart-bar.users { background: linear-gradient(180deg, #a371f7, #58a6ff); }
+        .chart-label { font-size: 10px; color: #6e7681; }
+        .chart-value { font-size: 10px; color: #8b949e; }
+        .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; }
+        .amount-pos { color: #2ecc71; }
+        .amount-neg { color: #e74c3c; }
+        .dash-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 8px; }
+        .dash-header h2 { margin-bottom: 0; }
+        .dash-updated { font-size: 12px; color: #6e7681; }
     </style>
 </head>
 <body>
@@ -106,6 +158,8 @@
             <a href="/dashboard">📊 Dashboard</a>
             <a href="/users">👥 Пользователи</a>
             <a href="/plans">💎 Тарифы</a>
+            <a href="/promo-codes">🎟 Промокоды</a>
+            <a href="/settings">⚙️ Настройки</a>
             <a href="/servers">🌍 Серверы</a>
         </nav>
         <div class="logout">

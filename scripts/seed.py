@@ -67,6 +67,7 @@ async def seed():
                 host=settings.hub_domain,
                 port=10086,
                 protocol="vless",
+                max_users=50,
                 sort_order=1,
             )
             session.add(server)

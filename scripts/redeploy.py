@@ -51,6 +51,7 @@ systemctl restart qooq-api qooq-admin qooq-bot 2>/dev/null || systemctl restart 
 # Xray UUID sync every 5 minutes (when SSH key configured)
 grep -q sync_xray_users.py /etc/cron.d/qooq-vpn 2>/dev/null || cat > /etc/cron.d/qooq-vpn <<'CRON'
 */5 * * * * root cd /opt/qooq-vpn && .venv/bin/python scripts/sync_xray_users.py >> /var/log/qooq-xray-sync.log 2>&1
+*/5 * * * * root cd /opt/qooq-vpn && .venv/bin/python scripts/sync_traffic.py >> /var/log/qooq-traffic-sync.log 2>&1
 CRON
 """
 
