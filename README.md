@@ -2,7 +2,7 @@
 
 VPN-платформа с продажей подписок через Telegram-бот, ссылкой-подписки для Happ/v2rayNG и админ-панелью.
 
-Репозиторий для совместной разработки: бэкенд, бот, генерация конфигов, синхронизация ключей на Xray-сервере.
+Репозиторий: [github.com/Daniyarzr/qooqpook](https://github.com/Daniyarzr/qooqpook)
 
 **Подробный обзор для разработчика:** [docs/WHAT_IS_DONE.md](docs/WHAT_IS_DONE.md)
 
@@ -10,9 +10,9 @@ VPN-платформа с продажей подписок через Telegram-
 
 ## Что это и как работает (простыми словами)
 
-1. Пользователь заходит в **Telegram-бот** → покупает/активирует подписку.
+1. Пользователь заходит в **Telegram-бот** → пополняет баланс или активирует trial → покупает подписку.
 2. Бот выдаёт **индивидуальную ссылку** вида `https://keys.qooqvpn.ru/sub/{token}`.
-3. Пользователь вставляет ссылку в **Happ** (или v2rayNG) → клиент получает VLESS-ключ со **своим UUID**.
+3. Пользователь вставляет ссылку в **Happ** (или v2rayNG) → клиент получает VLESS-ключи (**отдельный UUID на каждое устройство**).
 4. Трафик идёт по цепочке Xray-туннеля:
 
 ```
@@ -25,53 +25,88 @@ VPN-платформа с продажей подписок через Telegram-
 Интернет
 ```
 
-5. Когда подписка **истекает**:
+5. Когда подписка **истекает** или **приостановлена**:
    - ссылка `/sub/{token}` перестаёт отдавать конфиг (403);
-   - UUID **удаляется с Yandex** — даже если кто-то сохранил ключ, он не работает.
+   - UUID **удаляются с Yandex** — сохранённый ключ не работает.
 
 ---
 
 ## Что уже сделано
 
 ### Backend (Python / FastAPI)
-- [x] PostgreSQL + SQLAlchemy модели: пользователи, подписки, тарифы, баланс, рефералы
+- [x] PostgreSQL + SQLAlchemy: пользователи, подписки, тарифы, баланс, устройства, промокоды
 - [x] REST API для mini-app и hub
-- [x] Subscription feed `/sub/{token}` — выдача конфигов VPN-клиентам
-- [x] Subscription Hub — красивая страница статуса подписки
-- [x] Alembic миграции
+- [x] Subscription feed `/sub/{token}` — multi-device VLESS, HWID-контроль
+- [x] Webhook ЮKassa `POST /api/v1/payments/yookassa/webhook`
+- [x] Alembic миграции `001`–`008`
 - [x] Docker Compose (PostgreSQL + Redis)
 
 ### Telegram-бот (aiogram 3)
-- [x] Главное меню, inline-кнопки
-- [x] Trial-подписка, тарифы, оплата с баланса
-- [x] **Пополнение баланса через ЮKassa** (карта, СБП и др.)
-- [x] Профиль с UUID и реферальным кодом
-- [x] Реферальные бонусы (% от покупки)
-- [x] Ссылка на подписку для Happ
+- [x] Главное меню, trial, тарифы, оплата с баланса
+- [x] **Пополнение баланса через ЮKassa**
+- [x] **Промокоды** при покупке подписки
+- [x] **Реферальная программа по ссылке** — автоматическая скидка (не промокод)
+- [x] **Управление устройствами** (до 3 на подписку, свой UUID каждому)
+- [x] Восстановление подписки после превышения лимита устройств
+- [x] Профиль, баланс, история операций
 
 ### Админ-панель
-- [x] Авторизация (логин/пароль, bcrypt)
-- [x] Dashboard, пользователи, тарифы, серверы
-- [x] Бан/разбан пользователей
+- [x] **Dashboard** — финансы, пользователи, графики за 14 дней, последние операции
+- [x] **Пользователи** — профиль, трафик, устройства, HWID, подписка, баланс
+- [x] **Промокоды** — создание, вкл/выкл, удаление
+- [x] **Серверы** — добавление/удаление, нагрузка, детальная страница
+- [x] **Настройки** — % реферальной скидки
+- [x] Бан/разбан, корректировка баланса, продление подписки
 
 ### VPN / Xray
-- [x] Индивидуальный `client_uuid` на каждую подписку
-- [x] Генерация VLESS-ссылки (формат для Happ)
-- [x] Генерация полного JSON-профиля с **обходом RU-сайтов** (vk, yandex, ozon → direct)
+- [x] **UUID на каждое устройство** подписки (не на пользователя)
 - [x] Синхронизация UUID на Yandex (`51.250.32.123`) по SSH
-- [x] Cron: блокировка истёкших подписок + обновление ключей на сервере
-- [x] Продление подписки **от текущей даты окончания**, если ещё активна
+- [x] **Лимит 3 устройства** — отслеживание HWID, автоприостановка + уведомление в Telegram
+- [x] **Синхронизация трафика** через Xray Stats API (cron каждые 5 мин)
+- [x] JSON-профиль с **обходом RU-сайтов** (vk, yandex, ozon → direct)
+- [x] Cron: sync UUID + sync traffic
 
 ### Production (задеплоено)
+
 | Домен | Назначение |
 |-------|------------|
 | `keys.qooqvpn.ru` | API + подписка `/sub/{token}` + hub |
 | `admin.qooqvpn.ru` | Админ-панель |
 | `app.qooqvpn.ru` | Telegram Mini App (базовая версия) |
 
-Серверы:
-- **Panel VPS:** `148.135.184.188` — API, бот, админка, Xray `:10086` (приём туннеля)
-- **Yandex:** `51.250.32.123` — Xray `:443` TLS (точка входа клиентов)
+| Сервер | IP | Роль | Ёмкость |
+|--------|-----|------|---------|
+| **Panel VPS** | `148.135.184.188` | API, бот, админка, PG, Xray `:10086` | ~**50** пользователей (888 MB RAM, 1 vCPU) |
+| **Yandex** | `51.250.32.123` | Xray `:443` TLS — точка входа клиентов | — |
+
+---
+
+## Устройства и лимиты
+
+| Лимит | Значение | Где настраивается |
+|-------|----------|-------------------|
+| Устройств на подписку | 3 | `MAX_DEVICES_PER_SUBSCRIPTION` в `.env` |
+| HWID (уникальные клиенты) | 3 | автоматически при обращении к `/sub/{token}` |
+| При превышении | SUSPENDED + Telegram-уведомление | — |
+| Восстановление | Удалить лишние → «Восстановить подписку» в боте | — |
+
+---
+
+## Реферальная программа
+
+- Ссылка: `https://t.me/{bot}?start=ref_{код}`
+- **Приглашённый** — скидка на первую покупку
+- **Пригласивший** — +N% скидки за каждого друга (суммируется, макс. 100%)
+- Процент настраивается в админке: **⚙️ Настройки**
+- Скидка применяется **автоматически**, без ввода промокода
+
+---
+
+## Промокоды
+
+- Админка → **🎟 Промокоды**: процент или фиксированная сумма, лимит использований, срок, привязка к тарифу
+- Бот → при покупке → **🎟 Ввести промокод**
+- Если промокод выгоднее реферальной скидки — применяется он
 
 ---
 
@@ -84,7 +119,7 @@ VPN-платформа с продажей подписок через Telegram-
 | `/sub/{token}?format=link` | VLESS текстом | ❌ |
 | `/sub/{token}?format=json` | JSON для отладки | ✅ |
 
-Подробнее про VPN-конфиги: [docs/VPN.md](docs/VPN.md)
+Подробнее: [docs/VPN.md](docs/VPN.md)
 
 ---
 
@@ -93,17 +128,17 @@ VPN-платформа с продажей подписок через Telegram-
 ```
 qooqpook/
 ├── src/
-│   ├── core/           # config.py, enums, utils
+│   ├── core/           # config, enums, utils
 │   ├── db/             # SQLAlchemy session
-│   ├── models/         # User, Subscription, VpnServer, ...
+│   ├── models/         # User, Subscription, Device, PromoCode, ...
 │   ├── repositories/   # доступ к БД
-│   ├── services/       # бизнес-логика, vpn_config, xray_sync
-│   ├── api/            # FastAPI: hub, sub_feed, miniapp, payments
-│   ├── bot/            # Telegram-бот
+│   ├── services/       # subscription, payment, devices, promo, referral, traffic_sync, xray_sync
+│   ├── api/            # FastAPI: hub, sub_feed, payments
+│   ├── bot/            # Telegram-бот (handlers, keyboards, FSM)
 │   └── admin/          # веб-админка (Jinja2)
-├── alembic/            # миграции
-├── scripts/            # seed, deploy, sync_xray_users
-├── docs/VPN.md         # документация по VPN
+├── alembic/versions/   # миграции 001–008
+├── scripts/            # seed, redeploy, sync_xray_users, sync_traffic
+├── docs/               # VPN.md, WHAT_IS_DONE.md
 ├── docker-compose.yml
 ├── run_api.py          # порт 8000
 ├── run_bot.py
@@ -145,6 +180,7 @@ BOT_TOKEN=...
 BOT_USERNAME=qooqtestbot
 DATABASE_URL=postgresql+asyncpg://qooq:...@localhost:5432/qooq_vpn
 HUB_DOMAIN=keys.qooqvpn.ru
+MAX_DEVICES_PER_SUBSCRIPTION=3
 
 # Синхронизация UUID на Yandex
 XRAY_SYNC_ENABLED=true
@@ -152,11 +188,18 @@ XRAY_SSH_HOST=51.250.32.123
 XRAY_SSH_USER=adminka
 XRAY_SSH_KEY_PATH=/root/.ssh/qooq_xray
 
-# Пополнение баланса (ЮKassa)
+# Статистика трафика (Xray Stats API)
+XRAY_STATS_ENABLED=true
+XRAY_STATS_API=127.0.0.1:10085
+
+# ЮKassa
 YOOKASSA_SHOP_ID=ваш_shop_id
 YOOKASSA_SECRET_KEY=ваш_секретный_ключ
 YOOKASSA_RETURN_URL=https://t.me/ваш_бот
 DEPOSIT_AMOUNTS=100,300,500,1000,2000
+
+# Реферальная скидка (дефолт; в prod — из админки → Настройки)
+REFERRAL_DISCOUNT_PERCENT=10
 ```
 
 **Не коммитьте `.env`** — он в `.gitignore`.
@@ -165,28 +208,18 @@ DEPOSIT_AMOUNTS=100,300,500,1000,2000
 
 ## Пополнение баланса (ЮKassa)
 
-Пользователь пополняет баланс в боте: **💰 Баланс → 💳 Пополнить → сумма → оплата на странице ЮKassa**.
+Пользователь: **💰 Баланс → 💳 Пополнить → сумма → оплата на странице ЮKassa**.
 
-После успешной оплаты:
-1. Webhook `POST /api/v1/payments/yookassa/webhook` зачисляет сумму на баланс
-2. Пользователь получает уведомление в Telegram
-3. Кнопка «🔄 Проверить оплату» — запасной вариант, если webhook задержался
+1. Webhook `POST /api/v1/payments/yookassa/webhook` зачисляет сумму
+2. Уведомление в Telegram
+3. Кнопка «🔄 Проверить оплату» — запасной вариант
 
-### Настройка
+### Настройка webhook
 
-1. Создайте магазин в [личном кабинете ЮKassa](https://yookassa.ru/)
-2. Добавьте в `.env` на сервере:
-   - `YOOKASSA_SHOP_ID` — ID магазина
-   - `YOOKASSA_SECRET_KEY` — секретный ключ API
-   - `YOOKASSA_RETURN_URL` — куда вернуть пользователя после оплаты (обычно `https://t.me/имя_бота`)
-3. В ЮKassa → **Интеграция → HTTP-уведомления** укажите URL:
-   ```
-   https://keys.qooqvpn.ru/api/v1/payments/yookassa/webhook
-   ```
-   Событие: `payment.succeeded`
-4. Перезапустите API и бота: `systemctl restart qooq-api qooq-bot`
-
-Для тестов используйте **тестовый** магазин и ключ с префиксом `test_`. Суммы пополнения задаются через `DEPOSIT_AMOUNTS` (по умолчанию 100–2000 ₽).
+1. [личный кабинет ЮKassa](https://yookassa.ru/) → магазин
+2. `.env`: `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`, `YOOKASSA_RETURN_URL`
+3. HTTP-уведомления → `https://keys.qooqvpn.ru/api/v1/payments/yookassa/webhook`, событие `payment.succeeded`
+4. `systemctl restart qooq-api qooq-bot`
 
 ---
 
@@ -197,7 +230,11 @@ set DEPLOY_PASSWORD=ваш_ssh_пароль
 python scripts/redeploy.py
 ```
 
-Скрипт заливает код на `/opt/qooq-vpn`, ставит зависимости, мигрирует БД, перезапускает сервисы.
+Скрипт: код → `/opt/qooq-vpn`, `pip install`, `alembic upgrade head`, перезапуск `qooq-api`, `qooq-admin`, `qooq-bot`.
+
+Cron на сервере (автоматически):
+- `sync_xray_users.py` — каждые 5 мин
+- `sync_traffic.py` — каждые 5 мин
 
 ---
 
@@ -205,11 +242,31 @@ python scripts/redeploy.py
 
 | Ситуация | Поведение |
 |----------|-----------|
-| Новая покупка | Создаётся подписка + token + UUID на Xray |
+| Новая покупка | Подписка + token + UUID на каждое устройство |
 | Продление (активна) | Дни **добавляются** к `expires_at` |
 | Продление (истекла) | Отсчёт **с момента оплаты** |
-| Истечение | Статус EXPIRED, UUID снят с сервера, `/sub/` → 403 |
-| Передача ключа другому | Работает пока активна подписка владельца; после — UUID удалён |
+| Истечение | EXPIRED, UUID сняты, `/sub/` → 403 |
+| >3 HWID | SUSPENDED, уведомление в бот, восстановление вручную |
+| Промокод / реферал | Скидка на оплату с баланса |
+
+---
+
+## Миграции БД
+
+| Версия | Содержание |
+|--------|------------|
+| 001 | Базовая схема |
+| 002 | Payment orders (ЮKassa) |
+| 003 | UUID на подписку |
+| 004 | Трафик (bytes на подписке и тарифе) |
+| 005 | Устройства подписки |
+| 006 | HWID + suspension_reason |
+| 007 | Промокоды |
+| 008 | system_settings + referral_discount_used |
+
+```bash
+alembic upgrade head
+```
 
 ---
 
@@ -217,31 +274,32 @@ python scripts/redeploy.py
 
 - [x] Бот + API + админка
 - [x] Subscription feed (VLESS + profile)
-- [x] Xray UUID sync
-- [x] RU-site bypass в profile-конфиге
-- [x] Production deploy
-- [x] Пополнение баланса через ЮKassa
+- [x] Xray UUID sync + multi-device
+- [x] ЮKassa, промокоды, реферальные скидки
+- [x] Лимит устройств + HWID
+- [x] Dashboard с финансовой аналитикой
+- [x] Управление серверами в админке
+- [x] Синхронизация трафика
 - [ ] Telegram Stars / крипто-оплата
 - [ ] Mini-app (полноценный WebApp)
-- [ ] Вторая ссылка в боте «с обходом RU»
 - [ ] Автовыбор формата подписки по User-Agent
+- [ ] Multi-node балансировка (несколько Yandex-узлов)
 
 ---
 
 ## Совместная разработка
 
-1. Клонировать репо
-2. Создать ветку: `git checkout -b feature/название`
-3. Коммит + push
-4. Pull Request на GitHub
+1. `git clone https://github.com/Daniyarzr/qooqpook.git`
+2. `git checkout -b feature/название`
+3. Коммит + push → Pull Request
 
-Добавить коллaborator: **GitHub → Settings → Collaborators**
+Collaborators: **GitHub → Settings → Collaborators**
 
 ---
 
 ## Стек
 
-Python 3.10+ · FastAPI · aiogram 3 · SQLAlchemy 2 · PostgreSQL · Redis · Alembic · Xray · Nginx · paramiko
+Python 3.10+ · FastAPI · aiogram 3 · SQLAlchemy 2 · PostgreSQL · Redis · Alembic · Xray · Nginx · paramiko · YooKassa API
 
 ---
 
