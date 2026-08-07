@@ -8,13 +8,15 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.admin.services import AdminService
 from src.core.config import Settings, get_settings
-from src.core.enums import SubscriptionStatus
+from src.core.enums import SubscriptionStatus, VpnConfigType
 from src.core.utils import build_subscription_url
 from src.db.session import get_session
+from src.models import Subscription
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 
@@ -512,6 +514,149 @@ def create_admin_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Server not found")
         return RedirectResponse(f"/servers/{server_id}?success=1", status_code=302)
 
+    @app.get("/configs", response_class=HTMLResponse)
+    async def configs_page(
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        admin = get_current_admin(request)
+        if not admin:
+            return RedirectResponse("/login", status_code=302)
+
+        service = AdminService(session)
+        config_rows = await service.list_configs_with_stats()
+        servers = await service.list_servers()
+        default_template = None
+        try:
+            from src.services.vpn_config_store import export_default_json_template
+
+            default_template = export_default_json_template()
+        except Exception:
+            pass
+
+        error = request.query_params.get("error")
+        success = request.query_params.get("success")
+        return templates.TemplateResponse(
+            request,
+            "configs.html",
+            {
+                "admin": admin,
+                "config_rows": config_rows,
+                "servers": servers,
+                "default_template": default_template,
+                "config_types": VpnConfigType,
+                "error": error,
+                "success": success,
+            },
+        )
+
+    @app.get("/configs/{config_id}", response_class=HTMLResponse)
+    async def config_detail_page(
+        config_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        admin = get_current_admin(request)
+        if not admin:
+            return RedirectResponse("/login", status_code=302)
+
+        service = AdminService(session)
+        config = await service.get_config_by_id(config_id)
+        if not config:
+            raise HTTPException(status_code=404, detail="Config not found")
+
+        subs_count = await session.scalar(
+            select(func.count())
+            .select_from(Subscription)
+            .where(Subscription.config_id == config_id)
+        )
+
+        error = request.query_params.get("error")
+        success = request.query_params.get("success")
+        return templates.TemplateResponse(
+            request,
+            "config_detail.html",
+            {
+                "admin": admin,
+                "config": config,
+                "subscriptions_count": subs_count or 0,
+                "error": error,
+                "success": success,
+            },
+        )
+
+    @app.post("/configs/create")
+    async def create_config(
+        request: Request,
+        server_id: int = Form(...),
+        name: str = Form(...),
+        config_type: str = Form(...),
+        config_template: str = Form(...),
+        is_default: bool = Form(False),
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        try:
+            config = await service.create_vpn_config(
+                server_id=server_id,
+                name=name,
+                config_type=config_type,
+                config_template=config_template,
+                is_default=is_default,
+            )
+        except ValueError as exc:
+            return RedirectResponse(f"/configs?error={quote(str(exc))}", status_code=302)
+        return RedirectResponse(f"/configs/{config.id}?success=created", status_code=302)
+
+    @app.post("/configs/{config_id}/update")
+    async def update_config(
+        config_id: int,
+        request: Request,
+        name: str = Form(...),
+        config_template: str = Form(...),
+        is_default: bool = Form(False),
+        is_active: bool = Form(False),
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        try:
+            config = await service.update_vpn_config(
+                config_id,
+                name=name,
+                config_template=config_template,
+                is_default=is_default,
+                is_active=is_active,
+            )
+        except ValueError as exc:
+            return RedirectResponse(
+                f"/configs/{config_id}?error={quote(str(exc))}",
+                status_code=302,
+            )
+        if not config:
+            raise HTTPException(status_code=404, detail="Config not found")
+        return RedirectResponse(f"/configs/{config_id}?success=1", status_code=302)
+
+    @app.post("/configs/{config_id}/delete")
+    async def delete_config(
+        config_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        try:
+            ok = await service.delete_vpn_config(config_id)
+        except ValueError as exc:
+            return RedirectResponse(f"/configs?error={quote(str(exc))}", status_code=302)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Config not found")
+        return RedirectResponse("/configs?success=deleted", status_code=302)
+
     @app.get("/promo-codes", response_class=HTMLResponse)
     async def promo_codes_page(
         request: Request,
@@ -621,7 +766,7 @@ def create_admin_app() -> FastAPI:
             return RedirectResponse("/login", status_code=302)
 
         service = AdminService(session)
-        referral_discount = await service.get_referral_discount_percent(settings)
+        referral_bonus = await service.get_referral_bonus_percent(settings)
         success = request.query_params.get("success")
         error = request.query_params.get("error")
         return templates.TemplateResponse(
@@ -629,27 +774,27 @@ def create_admin_app() -> FastAPI:
             "settings.html",
             {
                 "admin": admin,
-                "referral_discount_percent": referral_discount,
+                "referral_bonus_percent": referral_bonus,
                 "success": success,
                 "error": error,
             },
         )
 
-    @app.post("/settings/referral-discount")
-    async def update_referral_discount(
+    @app.post("/settings/referral-bonus")
+    async def update_referral_bonus(
         request: Request,
-        referral_discount_percent: int = Form(...),
+        referral_bonus_percent: int = Form(...),
         session: AsyncSession = Depends(get_session),
     ):
         if not get_current_admin(request):
             raise HTTPException(status_code=401)
-        if referral_discount_percent < 0 or referral_discount_percent > 100:
+        if referral_bonus_percent < 0 or referral_bonus_percent > 100:
             return RedirectResponse(
                 f"/settings?error={quote('Процент должен быть от 0 до 100')}",
                 status_code=302,
             )
         service = AdminService(session)
-        await service.set_referral_discount_percent(settings, referral_discount_percent)
+        await service.set_referral_bonus_percent(settings, referral_bonus_percent)
         return RedirectResponse("/settings?success=1", status_code=302)
 
     return app

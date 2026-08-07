@@ -118,6 +118,13 @@ class DeviceLimitService:
         subscription.suspension_reason = self.SUSPENSION_REASON
         await self.session.flush()
 
+        from src.services.config_credentials import ConfigCredentialService
+
+        await ConfigCredentialService(self.session, self.settings).revoke_subscription(
+            subscription.id
+        )
+        await self.session.flush()
+
         if subscription.device_limit_notified_at:
             return True
 
@@ -158,6 +165,11 @@ class DeviceLimitService:
         await self.session.flush()
 
         from src.services import SubscriptionService
+        from src.services.config_credentials import ConfigCredentialService
+
+        await ConfigCredentialService(self.session, self.settings).refresh_subscription(
+            subscription
+        )
 
         await SubscriptionService(self.session, self.settings).sync_xray_clients()
         return True

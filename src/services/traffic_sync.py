@@ -17,16 +17,17 @@ from src.services.xray_sync import QOOQ_EMAIL_PREFIX
 logger = logging.getLogger(__name__)
 
 STAT_PATTERN = re.compile(
-    rf"user>>>{re.escape(QOOQ_EMAIL_PREFIX)}(\d+)(?:-d(\d+))?>>>traffic>>>(uplink|downlink)"
+    rf"user>>>{re.escape(QOOQ_EMAIL_PREFIX)}(\d+)(?:-(?:d(\d+)|c(\d+)))?>>>traffic>>>(uplink|downlink)"
 )
 
 
 @dataclass(frozen=True)
 class DeviceTraffic:
     user_id: int
-    device_id: int | None
     upload: int
     download: int
+    device_id: int | None = None
+    credential_id: int | None = None
 
 
 class TrafficSyncService:
@@ -38,23 +39,41 @@ class TrafficSyncService:
             return []
 
         raw_stats = self._query_remote_stats()
-        keyed: dict[tuple[int, int | None], DeviceTraffic] = {}
+        keyed: dict[tuple[int, int | None, int | None], DeviceTraffic] = {}
         for name, value in raw_stats.items():
             match = STAT_PATTERN.match(name)
             if not match:
                 continue
             user_id = int(match.group(1))
             device_id = int(match.group(2)) if match.group(2) else None
-            direction = match.group(3)
-            key = (user_id, device_id)
-            entry = keyed.get(key, DeviceTraffic(user_id=user_id, device_id=device_id, upload=0, download=0))
+            credential_id = int(match.group(3)) if match.group(3) else None
+            direction = match.group(4)
+            key = (user_id, device_id, credential_id)
+            entry = keyed.get(
+                key,
+                DeviceTraffic(
+                    user_id=user_id,
+                    device_id=device_id,
+                    credential_id=credential_id,
+                    upload=0,
+                    download=0,
+                ),
+            )
             if direction == "uplink":
                 entry = DeviceTraffic(
-                    user_id=user_id, device_id=device_id, upload=value, download=entry.download
+                    user_id=user_id,
+                    device_id=device_id,
+                    credential_id=credential_id,
+                    upload=value,
+                    download=entry.download,
                 )
             else:
                 entry = DeviceTraffic(
-                    user_id=user_id, device_id=device_id, upload=entry.upload, download=value
+                    user_id=user_id,
+                    device_id=device_id,
+                    credential_id=credential_id,
+                    upload=entry.upload,
+                    download=value,
                 )
             keyed[key] = entry
         return list(keyed.values())
@@ -78,6 +97,7 @@ class TrafficSyncService:
         subscription: Subscription,
         traffic_list: list[DeviceTraffic],
         devices: list,
+        credential_device_map: dict[int, int] | None = None,
     ) -> bool:
         if not devices:
             return False
@@ -87,19 +107,39 @@ class TrafficSyncService:
             (
                 item
                 for item in traffic_list
-                if item.device_id is None and item.user_id == subscription.user_id
+                if item.device_id is None
+                and item.credential_id is None
+                and item.user_id == subscription.user_id
             ),
             None,
         )
 
         for device in devices:
-            traffic = next(
-                (item for item in traffic_list if item.device_id == device.id),
-                None,
+            device_traffic = [
+                item
+                for item in traffic_list
+                if item.device_id == device.id
+                or (
+                    item.credential_id is not None
+                    and credential_device_map
+                    and credential_device_map.get(item.credential_id) == device.id
+                )
+            ]
+            if not device_traffic and legacy_traffic and len(devices) == 1:
+                device_traffic = [legacy_traffic]
+
+            if not device_traffic:
+                continue
+
+            total_upload = sum(item.upload for item in device_traffic)
+            total_download = sum(item.download for item in device_traffic)
+            combined = DeviceTraffic(
+                user_id=subscription.user_id,
+                device_id=device.id,
+                upload=total_upload,
+                download=total_download,
             )
-            if not traffic and legacy_traffic and len(devices) == 1:
-                traffic = legacy_traffic
-            if traffic and self.apply_traffic_to_device(device, traffic):
+            if self.apply_traffic_to_device(device, combined):
                 updated = True
 
         subscription.bytes_upload = sum(device.bytes_upload for device in devices)

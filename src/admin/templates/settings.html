@@ -13,26 +13,26 @@
 <section class="card" style="max-width:560px;">
     <h3>🎁 Реферальная программа</h3>
     <p class="muted" style="margin-bottom:16px;">
-        Скидка применяется автоматически по реферальной ссылке (без промокода):
-        приглашённый получает скидку на первую покупку, пригласивший — за каждого друга.
+        Пригласивший получает процент на баланс с каждого пополнения приглашённого пользователя.
+        Бонус начисляется повторно при каждом новом пополнении.
     </p>
-    <form method="post" action="/settings/referral-discount" class="inline-form">
-        <label for="referral_discount_percent">Скидка за реферала, %</label>
+    <form method="post" action="/settings/referral-bonus" class="inline-form">
+        <label for="referral_bonus_percent">Бонус с пополнения реферала, %</label>
         <input
             type="number"
-            id="referral_discount_percent"
-            name="referral_discount_percent"
+            id="referral_bonus_percent"
+            name="referral_bonus_percent"
             min="0"
             max="100"
-            value="{{ referral_discount_percent }}"
+            value="{{ referral_bonus_percent }}"
             class="input-sm"
             required
         >
         <button type="submit" class="btn-sm btn-success">Сохранить</button>
     </form>
     <p class="muted" style="margin-top:12px;">
-        Пример: 3 приглашённых друга × {{ referral_discount_percent }}% =
-        {{ referral_discount_percent * 3 }}% скидки (не более 100%).
+        Пример: друг пополнил на 1000 ₽ → реферер получает {{ referral_bonus_percent }}% =
+        {{ (referral_bonus_percent * 10) }} ₽ на баланс.
     </p>
 </section>
 {% endblock %}

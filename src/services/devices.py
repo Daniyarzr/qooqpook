@@ -99,6 +99,10 @@ class DeviceService:
             await self.devices.get_by_subscription(subscription.id)
         )[0].client_uuid
         await self.session.flush()
+
+        from src.services.config_credentials import ConfigCredentialService
+
+        await ConfigCredentialService(self.session, self.settings).ensure_credentials(subscription)
         return device
 
     async def delete_device(
@@ -111,6 +115,10 @@ class DeviceService:
             return False
 
         subscription = device.subscription
+
+        from src.services.config_credentials import ConfigCredentialService
+
+        await ConfigCredentialService(self.session, self.settings).revoke_device(device_id)
         await self.devices.delete(device)
 
         if subscription:

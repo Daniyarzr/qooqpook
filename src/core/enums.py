@@ -31,6 +31,11 @@ class ServerStatus(str, enum.Enum):
     MAINTENANCE = "maintenance"
 
 
+class VpnConfigType(str, enum.Enum):
+    VLESS_LINK = "vless_link"
+    XRAY_JSON = "xray_json"
+
+
 class PaymentMethod(str, enum.Enum):
     BALANCE = "balance"
     YOOKASSA = "yookassa"

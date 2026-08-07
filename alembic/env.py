@@ -13,6 +13,7 @@ from src.models import (  # noqa: F401 — register models
     ReferralReward,
     SystemSetting,
     Subscription,
+    SubscriptionConfigCredential,
     SubscriptionDevice,
     SubscriptionHwid,
     SubscriptionPlan,

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.core.config import Settings
-from src.core.enums import PaymentStatus, ServerStatus, SubscriptionStatus, TransactionType
+from src.core.enums import PaymentStatus, ServerStatus, SubscriptionStatus, TransactionType, VpnConfigType
 from src.core.utils import build_subscription_url, bytes_to_gb, format_bytes, utcnow
 from src.models import (
     AdminUser,
@@ -419,6 +419,7 @@ class AdminService:
         }
 
     async def sync_user_traffic(self, user_id: int, settings: Settings) -> bool:
+        from src.services.config_credentials import ConfigCredentialService
         from src.services.devices import DeviceRepository
 
         user = await self.get_user_by_id(user_id)
@@ -432,13 +433,19 @@ class AdminService:
         devices = await DeviceRepository(self.session).get_by_subscription(subscription.id)
         sync = TrafficSyncService(settings)
         traffic_list = sync.fetch_all_traffic()
-        updated = sync.apply_traffic_to_subscription(subscription, traffic_list, devices)
+        cred_map = await ConfigCredentialService(self.session).credential_device_map(
+            [subscription.id]
+        )
+        updated = sync.apply_traffic_to_subscription(
+            subscription, traffic_list, devices, cred_map
+        )
         if updated:
             await self.session.flush()
         return updated
 
     async def sync_all_traffic(self, settings: Settings) -> int:
         from src.repositories import SubscriptionRepository
+        from src.services.config_credentials import ConfigCredentialService
         from src.services.devices import DeviceRepository
 
         if not settings.xray_stats_enabled:
@@ -452,10 +459,15 @@ class AdminService:
         subs_repo = SubscriptionRepository(self.session)
         device_repo = DeviceRepository(self.session)
         active = await subs_repo.get_active_with_users()
+        cred_map = await ConfigCredentialService(self.session).credential_device_map(
+            [item.id for item in active]
+        )
         updated = 0
         for subscription in active:
             devices = await device_repo.get_by_subscription(subscription.id)
-            if sync.apply_traffic_to_subscription(subscription, traffic_list, devices):
+            if sync.apply_traffic_to_subscription(
+                subscription, traffic_list, devices, cred_map
+            ):
                 updated += 1
 
         if updated:
@@ -596,6 +608,11 @@ class AdminService:
             return False
 
         subscription.status = SubscriptionStatus.SUSPENDED
+        await self.session.flush()
+
+        from src.services.config_credentials import ConfigCredentialService
+
+        await ConfigCredentialService(self.session, settings).revoke_subscription(subscription.id)
         await self.session.flush()
 
         service = SubscriptionService(self.session, settings)
@@ -773,11 +790,87 @@ class AdminService:
         config = VpnConfig(
             server_id=server.id,
             name=f"{server.name} VLESS",
+            config_type=VpnConfigType.VLESS_LINK,
             config_template="vless://{uuid}@{host}:{port}?type=tcp&security=reality#{name}",
         )
         self.session.add(config)
         await self.session.flush()
+
+        from src.services.vpn_config_store import VpnConfigStore, export_default_json_template
+
+        await VpnConfigStore(self.session).create_config(
+            server_id=server.id,
+            name=f"{server.name} Xray JSON",
+            config_type=VpnConfigType.XRAY_JSON,
+            config_template=export_default_json_template(),
+            is_default=True,
+        )
         return server
+
+    async def list_configs_with_stats(self) -> list[dict]:
+        from src.services.vpn_config_store import VpnConfigStore
+
+        store = VpnConfigStore(self.session)
+        configs = await store.list_configs()
+        rows = []
+        for config in configs:
+            subs_count = await self.session.scalar(
+                select(func.count())
+                .select_from(Subscription)
+                .where(Subscription.config_id == config.id)
+            )
+            rows.append({"config": config, "subscriptions_count": subs_count or 0})
+        return rows
+
+    async def get_config_by_id(self, config_id: int) -> VpnConfig | None:
+        from src.services.vpn_config_store import VpnConfigStore
+
+        return await VpnConfigStore(self.session).get_by_id(config_id)
+
+    async def create_vpn_config(
+        self,
+        server_id: int,
+        name: str,
+        config_type: str,
+        config_template: str,
+        is_default: bool = False,
+    ) -> VpnConfig:
+        from src.services.vpn_config_store import VpnConfigStore
+
+        server = await self.get_server_by_id(server_id)
+        if not server:
+            raise ValueError("Сервер не найден")
+        return await VpnConfigStore(self.session).create_config(
+            server_id=server_id,
+            name=name,
+            config_type=VpnConfigType(config_type),
+            config_template=config_template,
+            is_default=is_default,
+        )
+
+    async def update_vpn_config(
+        self,
+        config_id: int,
+        *,
+        name: str | None = None,
+        config_template: str | None = None,
+        is_default: bool | None = None,
+        is_active: bool | None = None,
+    ) -> VpnConfig | None:
+        from src.services.vpn_config_store import VpnConfigStore
+
+        return await VpnConfigStore(self.session).update_config(
+            config_id,
+            name=name,
+            config_template=config_template,
+            is_default=is_default,
+            is_active=is_active,
+        )
+
+    async def delete_vpn_config(self, config_id: int) -> bool:
+        from src.services.vpn_config_store import VpnConfigStore
+
+        return await VpnConfigStore(self.session).delete_config(config_id)
 
     async def delete_server(self, server_id: int) -> bool:
         server = await self.get_server_by_id(server_id)
@@ -884,14 +977,20 @@ class AdminService:
 
         return await PromoCodeService(self.session).delete_promo(promo_id)
 
-    async def get_referral_discount_percent(self, settings: Settings) -> int:
+    async def get_referral_bonus_percent(self, settings: Settings) -> int:
         from src.services.system_settings import SystemSettingsService
 
-        return await SystemSettingsService(self.session, settings).get_referral_discount_percent()
+        return await SystemSettingsService(self.session, settings).get_referral_bonus_percent()
 
-    async def set_referral_discount_percent(self, settings: Settings, percent: int) -> int:
+    async def set_referral_bonus_percent(self, settings: Settings, percent: int) -> int:
         from src.services.system_settings import SystemSettingsService
 
-        return await SystemSettingsService(self.session, settings).set_referral_discount_percent(
+        return await SystemSettingsService(self.session, settings).set_referral_bonus_percent(
             percent
         )
+
+    async def get_referral_discount_percent(self, settings: Settings) -> int:
+        return await self.get_referral_bonus_percent(settings)
+
+    async def set_referral_discount_percent(self, settings: Settings, percent: int) -> int:
+        return await self.set_referral_bonus_percent(settings, percent)

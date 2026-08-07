@@ -24,7 +24,7 @@ async def get_subscription_hub(
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     service = SubscriptionService(session, settings)
-    data = service.build_hub_data(subscription, settings.bot_username)
+    data = await service.build_hub_data(subscription, settings.bot_username)
     return HubSubscriptionResponse(**data)
 
 
@@ -49,7 +49,7 @@ async def subscription_hub_page(
         )
 
     service = SubscriptionService(session, settings)
-    data = service.build_hub_data(subscription, settings.bot_username)
+    data = await service.build_hub_data(subscription, settings.bot_username)
 
     status_emoji = "✅" if data["active"] else "🔒"
     status_text = f"{status_emoji} {data['message']}"

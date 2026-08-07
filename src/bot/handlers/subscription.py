@@ -37,7 +37,7 @@ def _parse_confirm_callback(data: str) -> tuple[int, int | None]:
     return plan_id, promo_id
 
 
-async def _build_confirm_text(plan, referral=None, promo=None) -> str:
+async def _build_confirm_text(plan, promo=None) -> str:
     text = f"💎 <b>{plan.name}</b>\n\n📅 {plan.days} дней\n💰 Стоимость: <b>{plan.price} ₽</b>"
 
     if promo:
@@ -45,16 +45,7 @@ async def _build_confirm_text(plan, referral=None, promo=None) -> str:
             f"\n🎟 Промокод <code>{promo.promo.code}</code>: "
             f"<b>−{promo.discount_amount} ₽</b>"
         )
-    elif referral:
-        text += f"\n🎁 {referral.label}: <b>−{referral.discount_amount} ₽</b>"
-
-    final_price = plan.price
-    if promo:
-        final_price = promo.final_price
-    elif referral:
-        final_price = referral.final_price
-    if promo or referral:
-        text += f"\n💳 К оплате: <b>{final_price} ₽</b>"
+        text += f"\n💳 К оплате: <b>{promo.final_price} ₽</b>"
 
     if plan.description:
         text += f"\n\n{plan.description}"
@@ -197,7 +188,7 @@ async def confirm_purchase(
     from src.bot.keyboards.inline import confirm_purchase as confirm_kb
 
     pricing = await _resolve_display_pricing(session, settings, user.id, plan)
-    text = await _build_confirm_text(plan, referral=pricing.referral, promo=pricing.promo)
+    text = await _build_confirm_text(plan, promo=pricing.promo)
     await callback.message.edit_text(
         text,
         parse_mode="HTML",
@@ -294,7 +285,6 @@ async def apply_promo_code(
         )
     text = await _build_confirm_text(
         plan,
-        referral=pricing.referral,
         promo=pricing.promo,
     )
     await message.answer(

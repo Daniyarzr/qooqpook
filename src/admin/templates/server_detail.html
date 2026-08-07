@@ -134,14 +134,15 @@
         {% if server.configs %}
         <table>
             <thead>
-                <tr><th>ID</th><th>Название</th><th>Inbound</th><th>Активен</th></tr>
+                <tr><th>ID</th><th>Название</th><th>Тип</th><th>По умолчанию</th><th>Активен</th><th></th></tr>
             </thead>
             <tbody>
                 {% for config in server.configs %}
                 <tr>
                     <td>{{ config.id }}</td>
                     <td>{{ config.name }}</td>
-                    <td>{{ config.inbound_id or '—' }}</td>
+                    <td>{{ config.config_type.value }}</td>
+                    <td>{% if config.is_default %}⭐{% else %}—{% endif %}</td>
                     <td>
                         {% if config.is_active %}
                         <span class="badge badge-green">Да</span>
@@ -149,6 +150,7 @@
                         <span class="badge badge-red">Нет</span>
                         {% endif %}
                     </td>
+                    <td><a href="/configs/{{ config.id }}" class="user-link">Открыть</a></td>
                 </tr>
                 {% endfor %}
             </tbody>

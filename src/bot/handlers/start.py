@@ -39,8 +39,8 @@ async def cmd_start(message: Message, session: AsyncSession, settings: Settings)
         )
         text = WELCOME
         if referred_by_id:
-            percent = await SystemSettingsService(session, settings).get_referral_discount_percent()
-            text += REFERRAL_WELCOME.format(discount_percent=percent)
+            percent = await SystemSettingsService(session, settings).get_referral_bonus_percent()
+            text += REFERRAL_WELCOME.format(bonus_percent=percent)
     else:
         name = user.first_name or user.username or "друг"
         text = WELCOME_BACK.format(name=name)

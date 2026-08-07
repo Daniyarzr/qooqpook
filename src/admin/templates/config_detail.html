@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ config.name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <a href="/configs" class="back-link">← К списку конфигов</a>
+    <h2>📄 {{ config.name }}</h2>
+</div>
+
+{% if error %}
+<p class="muted" style="color:#e74c3c;margin-bottom:16px;">⚠️ {{ error }}</p>
+{% endif %}
+{% if success == 'created' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Конфиг создан</p>
+{% elif success %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Сохранено</p>
+{% endif %}
+
+<div class="detail-grid">
+    <section class="card">
+        <h3>Информация</h3>
+        <dl class="info-list">
+            <dt>ID</dt><dd>{{ config.id }}</dd>
+            <dt>Сервер</dt>
+            <dd>
+                {% if config.server %}
+                <a href="/servers/{{ config.server.id }}" class="user-link">
+                    {{ config.server.country_flag }} {{ config.server.name }}
+                </a>
+                {% else %}—{% endif %}
+            </dd>
+            <dt>Тип</dt><dd>{{ config.config_type.value }}</dd>
+            <dt>Подписок</dt><dd>{{ subscriptions_count }}</dd>
+            <dt>По умолчанию</dt><dd>{{ 'да' if config.is_default else 'нет' }}</dd>
+            <dt>Активен</dt><dd>{{ 'да' if config.is_active else 'нет' }}</dd>
+            <dt>Создан</dt><dd>{{ config.created_at.strftime('%d.%m.%Y %H:%M') }}</dd>
+        </dl>
+    </section>
+
+    <section class="card card-wide">
+        <h3>✏️ Редактировать шаблон</h3>
+        <p class="muted" style="margin-bottom:12px;">
+            Для Xray JSON обязательны плейсхолдеры <code>{uuid}</code> и <code>{remarks}</code>.
+        </p>
+        <form method="post" action="/configs/{{ config.id }}/update" class="inline-form" style="flex-direction:column;align-items:stretch;">
+            <input type="text" name="name" value="{{ config.name }}" class="input-sm" required>
+            <textarea name="config_template" rows="24" class="input-sm" style="width:100%;font-family:monospace;font-size:12px;" required>{{ config.config_template }}</textarea>
+            <div class="inline-form">
+                <label class="muted" style="display:flex;align-items:center;gap:6px;">
+                    <input type="checkbox" name="is_default" value="true" {% if config.is_default %}checked{% endif %}>
+                    Шаблон по умолчанию
+                </label>
+                <label class="muted" style="display:flex;align-items:center;gap:6px;">
+                    <input type="checkbox" name="is_active" value="true" {% if config.is_active %}checked{% endif %}>
+                    Активен
+                </label>
+                <button type="submit" class="btn-sm btn-success">Сохранить</button>
+            </div>
+        </form>
+    </section>
+</div>
+
+<div class="section-actions" style="margin-top:24px;">
+    <form method="post" action="/configs/{{ config.id }}/delete"
+          onsubmit="return confirm('Удалить конфиг {{ config.name }}?');">
+        <button type="submit" class="btn-sm btn-danger" {% if subscriptions_count > 0 %}disabled title="Есть привязанные подписки"{% endif %}>
+            🗑 Удалить конфиг
+        </button>
+    </form>
+    {% if subscriptions_count > 0 %}
+    <p class="muted">Нельзя удалить: {{ subscriptions_count }} подписок используют этот конфиг</p>
+    {% endif %}
+</div>
+{% endblock %}

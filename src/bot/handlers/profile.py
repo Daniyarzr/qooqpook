@@ -12,6 +12,7 @@ from src.models import User
 from src.repositories import UserRepository
 from src.services import BalanceService, SubscriptionService
 from src.services.devices import DeviceService
+from src.services.referral import ReferralService
 from src.services.system_settings import SystemSettingsService
 
 router = Router(name="profile")
@@ -122,19 +123,16 @@ async def show_referral(callback: CallbackQuery, session: AsyncSession, settings
     referrals_count = result.scalar() or 0
 
     settings_service = SystemSettingsService(session, settings)
-    discount_percent = await settings_service.get_referral_discount_percent()
-    welcome = bool(user.referred_by_id and not user.referral_discount_used)
-    current_discount = min(
-        100,
-        referrals_count * discount_percent + (discount_percent if welcome else 0),
-    )
+    referral_service = ReferralService(session, settings)
+    bonus_percent = await settings_service.get_referral_bonus_percent()
+    total_earned = await referral_service.total_bonus_earned(user.id)
 
     referral_link = build_referral_link(settings.bot_username, user.referral_code)
     text = REFERRAL.format(
         referral_link=referral_link,
-        discount_percent=discount_percent,
+        bonus_percent=bonus_percent,
         referrals_count=referrals_count,
-        current_discount=current_discount,
+        total_earned=total_earned,
     )
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_to_menu())
     await callback.answer()

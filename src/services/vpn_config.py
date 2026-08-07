@@ -164,15 +164,45 @@ XRAY_CONFIG_TEMPLATE: dict[str, Any] = {
 }
 
 
-def build_xray_config(client_uuid: uuid.UUID, remark: str = DEFAULT_REMARK) -> dict[str, Any]:
+def build_xray_config(
+    client_uuid: uuid.UUID,
+    remark: str = DEFAULT_REMARK,
+    template: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if template is not None:
+        from src.services.vpn_config_store import apply_json_template
+
+        return apply_json_template(template, client_uuid, remark)
+
     config = copy.deepcopy(XRAY_CONFIG_TEMPLATE)
     config["remarks"] = sanitize_remark(remark)
     config["outbounds"][0]["settings"]["vnext"][0]["users"][0]["id"] = str(client_uuid)
     return config
 
 
-def build_xray_config_json(client_uuid: uuid.UUID, remark: str = DEFAULT_REMARK) -> str:
-    return json.dumps(build_xray_config(client_uuid, remark), ensure_ascii=False, indent=2)
+def build_xray_config_json(
+    client_uuid: uuid.UUID,
+    remark: str = DEFAULT_REMARK,
+    template: dict[str, Any] | None = None,
+) -> str:
+    return json.dumps(
+        build_xray_config(client_uuid, remark, template=template),
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+def build_subscription_payload(
+    client_uuid: uuid.UUID,
+    remark: str = DEFAULT_REMARK,
+    template: dict[str, Any] | None = None,
+) -> str:
+    """Base64 full Xray JSON — RU site routing + individual UUID."""
+    raw = json.dumps(
+        build_xray_config(client_uuid, remark, template=template),
+        ensure_ascii=False,
+    )
+    return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
 
 def sanitize_remark(remark: str) -> str:
@@ -194,12 +224,6 @@ def build_vless_link(client_uuid: uuid.UUID, remark: str = DEFAULT_REMARK) -> st
     return f"vless://{client_uuid}@{VPN_HOST}:{VPN_PORT}?{params}#{name}"
 
 
-def build_subscription_payload(client_uuid: uuid.UUID, remark: str = DEFAULT_REMARK) -> str:
-    """Base64 full Xray JSON — RU site routing + individual UUID."""
-    raw = json.dumps(build_xray_config(client_uuid, remark), ensure_ascii=False)
-    return base64.b64encode(raw.encode("utf-8")).decode("ascii")
-
-
 def build_vless_subscription_payload(client_uuid: uuid.UUID, remark: str = DEFAULT_REMARK) -> str:
     """Base64 vless share link for simple Happ import."""
     body = build_vless_link(client_uuid, remark) + "\n"
@@ -215,6 +239,21 @@ def build_multi_vless_subscription_payload(
 
 def build_multi_vless_links_text(links: list[tuple[uuid.UUID, str]]) -> str:
     return "".join(build_vless_link(client_uuid, remark) + "\n" for client_uuid, remark in links)
+
+
+EXPIRED_PLACEHOLDER_UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")
+EXPIRED_SERVER_REMARK = "Podpiska-istekla-prodlite-v-Telegram"
+
+
+def build_inactive_vless_link(remark: str = EXPIRED_SERVER_REMARK) -> str:
+    """Non-working VLESS entry so Happ shows an expired notice in the server list."""
+    name = quote(sanitize_remark(remark), safe="")
+    return f"vless://{EXPIRED_PLACEHOLDER_UUID}@127.0.0.1:1?encryption=none&security=none&type=tcp#{name}"
+
+
+def build_inactive_subscription_payload(remark: str = EXPIRED_SERVER_REMARK) -> str:
+    body = build_inactive_vless_link(remark) + "\n"
+    return base64.b64encode(body.encode("utf-8")).decode("ascii")
 
 
 def build_xray_subscription_payload(client_uuid: uuid.UUID, remark: str = DEFAULT_REMARK) -> str:

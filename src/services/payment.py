@@ -103,6 +103,15 @@ class PaymentService:
         )
 
         user = await self.users.get_by_id(order.user_id)
+        if user:
+            from src.services.referral import ReferralService
+
+            await ReferralService(self.session, self.settings).process_deposit_bonus(
+                user,
+                order.amount,
+                tx.id,
+            )
+
         if user and self.settings.bot_token:
             await self._notify_user(
                 telegram_id=user.telegram_id,

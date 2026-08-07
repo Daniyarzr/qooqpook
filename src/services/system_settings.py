@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import Settings
 from src.models import SystemSetting
 
-REFERRAL_DISCOUNT_KEY = "referral_discount_percent"
+REFERRAL_BONUS_KEY = "referral_bonus_percent"
+REFERRAL_DISCOUNT_KEY = "referral_discount_percent"  # legacy
 
 
 class SystemSettingsService:
@@ -37,16 +38,24 @@ class SystemSettingsService:
         await self.session.flush()
         return row
 
-    async def get_referral_discount_percent(self) -> int:
-        default = str(self.settings.referral_discount_percent if self.settings else 10)
-        raw = await self.get(REFERRAL_DISCOUNT_KEY, default)
+    async def get_referral_bonus_percent(self) -> int:
+        default = str(self.settings.referral_bonus_percent if self.settings else 10)
+        raw = await self.get(REFERRAL_BONUS_KEY, None)
+        if raw is None:
+            raw = await self.get(REFERRAL_DISCOUNT_KEY, default)
         try:
             value = int(raw or default)
         except (TypeError, ValueError):
             value = int(default)
         return max(0, min(100, value))
 
-    async def set_referral_discount_percent(self, percent: int) -> int:
+    async def set_referral_bonus_percent(self, percent: int) -> int:
         percent = max(0, min(100, percent))
-        await self.set(REFERRAL_DISCOUNT_KEY, str(percent))
+        await self.set(REFERRAL_BONUS_KEY, str(percent))
         return percent
+
+    async def get_referral_discount_percent(self) -> int:
+        return await self.get_referral_bonus_percent()
+
+    async def set_referral_discount_percent(self, percent: int) -> int:
+        return await self.set_referral_bonus_percent(percent)

@@ -26,6 +26,7 @@ from src.core.enums import (
     SubscriptionStatus,
     SuspensionReason,
     TransactionType,
+    VpnConfigType,
 )
 from src.db.base import Base
 
@@ -103,8 +104,12 @@ class VpnConfig(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     server_id: Mapped[int] = mapped_column(ForeignKey("vpn_servers.id"))
     name: Mapped[str] = mapped_column(String(128))
+    config_type: Mapped[VpnConfigType] = mapped_column(
+        _enum(VpnConfigType), default=VpnConfigType.XRAY_JSON
+    )
     config_template: Mapped[str] = mapped_column(Text)
     inbound_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -114,6 +119,9 @@ class VpnConfig(Base):
     server: Mapped["VpnServer"] = relationship("VpnServer", back_populates="configs")
     subscriptions: Mapped[list["Subscription"]] = relationship(
         "Subscription", back_populates="config"
+    )
+    credentials: Mapped[list["SubscriptionConfigCredential"]] = relationship(
+        "SubscriptionConfigCredential", back_populates="vpn_config"
     )
 
 
@@ -181,6 +189,11 @@ class Subscription(Base):
         back_populates="subscription",
         cascade="all, delete-orphan",
     )
+    config_credentials: Mapped[list["SubscriptionConfigCredential"]] = relationship(
+        "SubscriptionConfigCredential",
+        back_populates="subscription",
+        cascade="all, delete-orphan",
+    )
 
 
 class SubscriptionHwid(Base):
@@ -213,6 +226,51 @@ class SubscriptionDevice(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     subscription: Mapped["Subscription"] = relationship("Subscription", back_populates="devices")
+    credentials: Mapped[list["SubscriptionConfigCredential"]] = relationship(
+        "SubscriptionConfigCredential",
+        back_populates="device",
+        cascade="all, delete-orphan",
+    )
+
+
+class SubscriptionConfigCredential(Base):
+    """Unique Xray UUID per subscription device and VPN config template."""
+
+    __tablename__ = "subscription_config_credentials"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscription_id",
+            "device_id",
+            "vpn_config_id",
+            name="uq_subscription_config_credential",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subscription_id: Mapped[int] = mapped_column(
+        ForeignKey("subscriptions.id", ondelete="CASCADE"), index=True
+    )
+    device_id: Mapped[int] = mapped_column(
+        ForeignKey("subscription_devices.id", ondelete="CASCADE"), index=True
+    )
+    vpn_config_id: Mapped[int] = mapped_column(
+        ForeignKey("vpn_configs.id", ondelete="CASCADE"), index=True
+    )
+    client_uuid: Mapped[uuid_std.UUID] = mapped_column(
+        UUID(as_uuid=True), unique=True, default=uuid_std.uuid4, index=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    subscription: Mapped["Subscription"] = relationship(
+        "Subscription", back_populates="config_credentials"
+    )
+    device: Mapped["SubscriptionDevice"] = relationship(
+        "SubscriptionDevice", back_populates="credentials"
+    )
+    vpn_config: Mapped["VpnConfig"] = relationship("VpnConfig", back_populates="credentials")
 
 
 class Transaction(Base):
@@ -262,7 +320,6 @@ class PaymentOrder(Base):
 
 class ReferralReward(Base):
     __tablename__ = "referral_rewards"
-    __table_args__ = (UniqueConstraint("referrer_id", "referred_id", name="uq_referral_pair"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     referrer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
@@ -270,6 +327,9 @@ class ReferralReward(Base):
     bonus_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
     bonus_days: Mapped[int] = mapped_column(default=0)
     is_paid: Mapped[bool] = mapped_column(Boolean, default=False)
+    source_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("transactions.id"), nullable=True, unique=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

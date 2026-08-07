@@ -7,7 +7,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import Settings
-from src.core.enums import PaymentMethod, SubscriptionStatus, TransactionType
+from src.core.enums import PaymentMethod, SubscriptionStatus, TransactionType, VpnConfigType
 from src.core.utils import (
     build_subscription_url,
     extend_expiry,
@@ -21,6 +21,7 @@ from src.repositories import (
     TransactionRepository,
     UserRepository,
 )
+from src.services.config_credentials import ConfigCredentialService
 from src.services.devices import DeviceRepository, DeviceService
 from src.services.xray_sync import XrayClient, sync_active_clients
 
@@ -59,6 +60,7 @@ class SubscriptionService:
         await self.subscriptions.create(subscription)
         device_service = DeviceService(self.session, self.settings)
         await device_service.ensure_default_device(subscription)
+        await ConfigCredentialService(self.session, self.settings).ensure_credentials(subscription)
         await self.sync_xray_clients()
         return subscription
 
@@ -78,7 +80,6 @@ class SubscriptionService:
 
         from src.services.pricing import PurchasePricingService
         from src.services.promo import PromoCodeService
-        from src.services.referral import ReferralService
 
         pricing = await PurchasePricingService(self.session, self.settings).resolve(
             user_id, plan, promo_code_id
@@ -105,10 +106,6 @@ class SubscriptionService:
         existing = await self.subscriptions.get_active_by_user(user_id)
         now = utcnow()
 
-        referral_service = ReferralService(self.session, self.settings)
-        if pricing.referral:
-            await referral_service.mark_welcome_used(user, pricing.referral)
-
         if existing:
             existing.expires_at = extend_expiry(existing.expires_at, plan.days)
             existing.status = SubscriptionStatus.ACTIVE
@@ -131,6 +128,9 @@ class SubscriptionService:
             device_service = DeviceService(self.session, self.settings)
             await device_service.ensure_default_device(subscription)
 
+        cred_service = ConfigCredentialService(self.session, self.settings)
+        await cred_service.ensure_credentials(subscription)
+
         if pricing.promo:
             await PromoCodeService(self.session).redeem(
                 pricing.promo.promo,
@@ -142,10 +142,27 @@ class SubscriptionService:
         await self.sync_xray_clients()
         return subscription
 
+    async def expire_subscription(self, subscription: Subscription) -> None:
+        if subscription.status == SubscriptionStatus.EXPIRED:
+            await ConfigCredentialService(self.session, self.settings).revoke_subscription(
+                subscription.id
+            )
+            await self.session.flush()
+            await self.sync_xray_clients()
+            return
+
+        subscription.status = SubscriptionStatus.EXPIRED
+        await ConfigCredentialService(self.session, self.settings).revoke_subscription(
+            subscription.id
+        )
+        await self.session.flush()
+        await self.sync_xray_clients()
+
     async def suspend_expired(self) -> int:
         expired = await self.subscriptions.get_expired_active()
         for sub in expired:
             sub.status = SubscriptionStatus.EXPIRED
+            await ConfigCredentialService(self.session, self.settings).revoke_subscription(sub.id)
         await self.session.flush()
         if expired:
             await self.sync_xray_clients()
@@ -155,21 +172,20 @@ class SubscriptionService:
         if not self.settings.xray_sync_enabled:
             return False
 
-        active = await self.subscriptions.get_active_with_users()
-        device_repo = DeviceRepository(self.session)
-        all_devices = await device_repo.get_all_for_active_subscriptions()
+        cred_service = ConfigCredentialService(self.session, self.settings)
+        credentials = await cred_service.get_all_for_active_subscriptions()
         clients = [
             XrayClient(
-                user_id=device.subscription.user_id,
-                device_id=device.id,
-                client_uuid=device.client_uuid,
+                user_id=credential.subscription.user_id,
+                credential_id=credential.id,
+                client_uuid=credential.client_uuid,
             )
-            for device in all_devices
-            if device.subscription
+            for credential in credentials
+            if credential.subscription
         ]
         return await asyncio.to_thread(sync_active_clients, self.settings, clients)
 
-    def build_hub_data(self, subscription: Subscription | None, bot_username: str) -> dict:
+    async def build_hub_data(self, subscription: Subscription | None, bot_username: str) -> dict:
         bot_link = f"https://t.me/{bot_username}"
 
         if not subscription or subscription.status == SubscriptionStatus.EXPIRED:
@@ -203,28 +219,48 @@ class SubscriptionService:
         from src.core.utils import format_datetime_ru, format_duration_until
         from src.services.vpn_config import build_vless_link, sanitize_remark
 
+        cred_service = ConfigCredentialService(self.session, self.settings)
+        await cred_service.ensure_credentials(subscription)
+        vless_credentials = await cred_service.list_active(
+            subscription.id, config_type=VpnConfigType.VLESS_LINK
+        )
+        if not vless_credentials:
+            vless_credentials = await cred_service.list_active(
+                subscription.id, config_type=VpnConfigType.XRAY_JSON
+            )
+
         configs = []
-        devices = list(subscription.devices) if subscription.devices else []
         user_label = (
             subscription.user.first_name or subscription.user.id
             if subscription.user
             else subscription.user_id
         )
-        if devices:
-            for device in devices:
+        if vless_credentials:
+            for credential in vless_credentials:
+                device_name = credential.device.name if credential.device else "Device"
                 configs.append(
                     build_vless_link(
-                        device.client_uuid,
-                        sanitize_remark(f"QooQ VPN {user_label} {device.name}"),
+                        credential.client_uuid,
+                        sanitize_remark(f"QooQ VPN {user_label} {device_name}"),
                     )
                 )
         else:
-            configs.append(
-                build_vless_link(
-                    subscription.client_uuid,
-                    sanitize_remark(f"QooQ VPN {user_label}"),
+            devices = list(subscription.devices) if subscription.devices else []
+            if devices:
+                for device in devices:
+                    configs.append(
+                        build_vless_link(
+                            device.client_uuid,
+                            sanitize_remark(f"QooQ VPN {user_label} {device.name}"),
+                        )
+                    )
+            else:
+                configs.append(
+                    build_vless_link(
+                        subscription.client_uuid,
+                        sanitize_remark(f"QooQ VPN {user_label}"),
+                    )
                 )
-            )
 
         return {
             "active": True,

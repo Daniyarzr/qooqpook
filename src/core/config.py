@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     # Subscription
     default_subscription_days: int = 30
-    referral_discount_percent: int = 10
+    referral_bonus_percent: int = 10
     trial_days: int = 3
     max_devices_per_subscription: int = 3
 

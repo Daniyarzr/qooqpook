@@ -20,12 +20,12 @@ QOOQ_EMAIL_PREFIX = "qooq-"
 @dataclass(frozen=True)
 class XrayClient:
     user_id: int
-    device_id: int
+    credential_id: int
     client_uuid: uuid.UUID
 
     @property
     def email(self) -> str:
-        return f"{QOOQ_EMAIL_PREFIX}{self.user_id}-d{self.device_id}"
+        return f"{QOOQ_EMAIL_PREFIX}{self.user_id}-c{self.credential_id}"
 
 
 class XraySyncService:

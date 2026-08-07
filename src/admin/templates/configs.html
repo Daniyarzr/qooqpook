@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}JSON конфиги{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>📄 JSON конфиги Xray</h2>
+    <p class="muted">
+        Шаблоны для выдачи подписок (<code>?format=profile</code>).
+        Обязательные плейсхолдеры: <code>{uuid}</code>, <code>{remarks}</code>.
+    </p>
+</div>
+
+{% if error %}
+<p class="muted" style="color:#e74c3c;margin-bottom:16px;">⚠️ {{ error }}</p>
+{% endif %}
+{% if success == 'created' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Конфиг создан</p>
+{% elif success == 'deleted' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Конфиг удалён</p>
+{% endif %}
+
+<section class="card" style="margin-bottom:24px;">
+    <h3>➕ Добавить конфиг</h3>
+    <form method="post" action="/configs/create" class="inline-form" style="flex-direction:column;align-items:stretch;">
+        <div class="inline-form">
+            <select name="server_id" class="input-sm" required>
+                <option value="">Сервер</option>
+                {% for server in servers %}
+                <option value="{{ server.id }}">{{ server.country_flag }} {{ server.name }}</option>
+                {% endfor %}
+            </select>
+            <input type="text" name="name" placeholder="Название" class="input-sm" required>
+            <select name="config_type" class="input-sm" required>
+                <option value="xray_json">Xray JSON</option>
+                <option value="vless_link">VLESS link</option>
+            </select>
+            <label class="muted" style="display:flex;align-items:center;gap:6px;">
+                <input type="checkbox" name="is_default" value="true">
+                По умолчанию
+            </label>
+        </div>
+        <textarea name="config_template" rows="12" class="input-sm" style="width:100%;font-family:monospace;font-size:12px;" required placeholder='{"remarks": "{remarks}", ...}'>{% if default_template %}{{ default_template }}{% endif %}</textarea>
+        <div class="inline-form">
+            <button type="submit" class="btn-sm btn-success">Добавить</button>
+        </div>
+    </form>
+</section>
+
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Название</th>
+            <th>Сервер</th>
+            <th>Тип</th>
+            <th>Подписок</th>
+            <th>По умолчанию</th>
+            <th>Активен</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in config_rows %}
+        {% set config = row.config %}
+        <tr>
+            <td>{{ config.id }}</td>
+            <td>
+                <a href="/configs/{{ config.id }}" class="user-link">{{ config.name }}</a>
+            </td>
+            <td>
+                {% if config.server %}
+                <a href="/servers/{{ config.server.id }}" class="user-link">
+                    {{ config.server.country_flag }} {{ config.server.name }}
+                </a>
+                {% else %}—{% endif %}
+            </td>
+            <td>
+                {% if config.config_type.value == 'xray_json' %}
+                <span class="badge badge-green">Xray JSON</span>
+                {% else %}
+                <span class="badge badge-red">VLESS</span>
+                {% endif %}
+            </td>
+            <td>{{ row.subscriptions_count }}</td>
+            <td>{% if config.is_default %}⭐{% else %}—{% endif %}</td>
+            <td>
+                {% if config.is_active %}
+                <span class="badge badge-green">Да</span>
+                {% else %}
+                <span class="badge badge-red">Нет</span>
+                {% endif %}
+            </td>
+            <td>
+                <a href="/configs/{{ config.id }}" class="btn-sm btn-success" style="text-decoration:none;">Открыть</a>
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="muted">Конфигов пока нет</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

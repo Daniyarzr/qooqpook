@@ -152,6 +152,7 @@ async def restore_subscription(callback: CallbackQuery, session: AsyncSession, s
         return
 
     limit_service = DeviceLimitService(session, settings)
+    device_service = DeviceService(session, settings)
     devices = await device_service.list_devices(subscription.id)
     if len(devices) > settings.max_devices_per_subscription:
         await callback.answer(
