@@ -17,6 +17,7 @@ from src.core.enums import SubscriptionStatus, VpnConfigType
 from src.core.utils import build_subscription_url
 from src.db.session import get_session
 from src.models import Subscription
+from src.services.vpn_config import get_vpn_architecture_info
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 
@@ -176,6 +177,8 @@ def create_admin_app() -> FastAPI:
                 "traffic": AdminService.build_traffic_info(subscription),
                 "subscription_url": subscription_url,
                 "stats_enabled": settings.xray_stats_enabled,
+                "success": request.query_params.get("success"),
+                "vpn_arch": get_vpn_architecture_info(),
             },
         )
 
@@ -293,6 +296,7 @@ def create_admin_app() -> FastAPI:
         request: Request,
         days: int = Form(...),
         session: AsyncSession = Depends(get_session),
+        settings: Settings = Depends(get_settings),
     ):
         if not get_current_admin(request):
             raise HTTPException(status_code=401)
@@ -300,7 +304,7 @@ def create_admin_app() -> FastAPI:
         ok = await service.extend_user_subscription(user_id, days, settings)
         if not ok:
             raise HTTPException(status_code=404, detail="Active subscription not found")
-        return RedirectResponse(f"/users/{user_id}", status_code=302)
+        return RedirectResponse(f"/users/{user_id}?success=extend", status_code=302)
 
     @app.post("/users/{user_id}/balance/adjust")
     async def adjust_balance(
@@ -309,6 +313,7 @@ def create_admin_app() -> FastAPI:
         amount: Decimal = Form(...),
         description: str = Form(...),
         session: AsyncSession = Depends(get_session),
+        settings: Settings = Depends(get_settings),
     ):
         if not get_current_admin(request):
             raise HTTPException(status_code=401)
@@ -316,8 +321,8 @@ def create_admin_app() -> FastAPI:
         user = await service.get_user_by_id(user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        await service.adjust_balance(user_id, amount, description)
-        return RedirectResponse(f"/users/{user_id}", status_code=302)
+        await service.adjust_balance(user_id, amount, description, settings)
+        return RedirectResponse(f"/users/{user_id}?success=balance", status_code=302)
 
     @app.post("/users/{user_id}/traffic/sync")
     async def sync_traffic(
@@ -356,11 +361,90 @@ def create_admin_app() -> FastAPI:
 
         service = AdminService(session)
         plans = await service.list_plans()
+        error = request.query_params.get("error")
+        success = request.query_params.get("success")
         return templates.TemplateResponse(
             request,
             "plans.html",
-            {"admin": admin, "plans": plans},
+            {"admin": admin, "plans": plans, "error": error, "success": success},
         )
+
+    @app.post("/plans/create")
+    async def create_plan(
+        request: Request,
+        name: str = Form(...),
+        days: int = Form(...),
+        price: Decimal = Form(...),
+        description: str = Form(""),
+        traffic_limit_gb: str = Form(""),
+        sort_order: int = Form(0),
+        is_active: bool = Form(False),
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        limit = int(traffic_limit_gb) if traffic_limit_gb.strip() else None
+        try:
+            await service.create_plan(
+                name=name,
+                days=days,
+                price=price,
+                description=description,
+                traffic_limit_gb=limit,
+                sort_order=sort_order,
+                is_active=is_active,
+            )
+        except ValueError as exc:
+            return RedirectResponse(f"/plans?error={quote(str(exc))}", status_code=302)
+        return RedirectResponse("/plans?success=created", status_code=302)
+
+    @app.post("/plans/{plan_id}/update")
+    async def update_plan(
+        plan_id: int,
+        request: Request,
+        name: str = Form(...),
+        days: int = Form(...),
+        price: Decimal = Form(...),
+        description: str = Form(""),
+        traffic_limit_gb: str = Form(""),
+        sort_order: int = Form(0),
+        is_active: bool = Form(False),
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        limit = int(traffic_limit_gb) if traffic_limit_gb.strip() else None
+        try:
+            plan = await service.update_plan(
+                plan_id,
+                name=name,
+                days=days,
+                price=price,
+                description=description,
+                traffic_limit_gb=limit,
+                sort_order=sort_order,
+                is_active=is_active,
+            )
+        except ValueError as exc:
+            return RedirectResponse(f"/plans?error={quote(str(exc))}", status_code=302)
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+        return RedirectResponse("/plans?success=updated", status_code=302)
+
+    @app.post("/plans/{plan_id}/toggle")
+    async def toggle_plan(
+        plan_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        if not await service.toggle_plan_active(plan_id):
+            raise HTTPException(status_code=404, detail="Plan not found")
+        return RedirectResponse("/plans", status_code=302)
 
     @app.get("/servers", response_class=HTMLResponse)
     async def servers_page(
@@ -383,6 +467,7 @@ def create_admin_app() -> FastAPI:
                 "server_rows": server_rows,
                 "error": error,
                 "success": success,
+                "vpn_arch": get_vpn_architecture_info(),
             },
         )
 

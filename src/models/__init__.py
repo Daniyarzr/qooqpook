@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.enums import (
     PaymentMethod,
+    PaymentOrderPurpose,
     PaymentStatus,
     PromoDiscountType,
     ServerStatus,
@@ -311,11 +312,22 @@ class PaymentOrder(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     external_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     status: Mapped[PaymentStatus] = mapped_column(_enum(PaymentStatus), default=PaymentStatus.PENDING)
+    purpose: Mapped[PaymentOrderPurpose] = mapped_column(
+        _enum(PaymentOrderPurpose), default=PaymentOrderPurpose.DEPOSIT
+    )
+    plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("subscription_plans.id"), nullable=True, index=True
+    )
+    promo_code_id: Mapped[int | None] = mapped_column(
+        ForeignKey("promo_codes.id"), nullable=True
+    )
     payment_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship("User", back_populates="payment_orders")
+    plan: Mapped["SubscriptionPlan | None"] = relationship("SubscriptionPlan")
+    promo_code: Mapped["PromoCode | None"] = relationship("PromoCode")
 
 
 class ReferralReward(Base):

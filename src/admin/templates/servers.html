@@ -14,6 +14,15 @@
 <p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Сервер удалён</p>
 {% endif %}
 
+<div class="flash flash-success" style="margin-bottom:20px;line-height:1.6;">
+    <strong>Как устроен туннель</strong><br>
+    📱 Клиент (Happ) подключается к <code>{{ vpn_arch.entry_host }}:{{ vpn_arch.entry_port }}</code>
+    (TLS, SNI <code>{{ vpn_arch.entry_sni }}</code>) — это <b>точка входа</b>.<br>
+    🔀 Дальше трафик идёт на внутренний сервер <code>{{ vpn_arch.tunnel_host }}:{{ vpn_arch.tunnel_port }}</code>
+    и выходит в интернет.<br>
+    💡 В Happ подписка называется «{{ vpn_arch.profile_title }}». Записи ниже — для учёта в админке.
+</div>
+
 <section class="card" style="margin-bottom:24px;">
     <h3>➕ Добавить сервер</h3>
     <form method="post" action="/servers/create" class="inline-form" style="flex-direction:column;align-items:stretch;">

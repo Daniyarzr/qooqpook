@@ -12,18 +12,23 @@ from src.bot.texts.messages import (
     PROMO_APPLIED,
     PROMO_ASK,
     PROMO_INVALID,
+    PURCHASE_PAYMENT_CREATED,
+    PURCHASE_PAYMENT_SUCCESS,
     SUBSCRIPTION_ACTIVE,
     SUBSCRIPTION_NONE,
+    SUBSCRIPTION_RESET_CONFIRM,
+    SUBSCRIPTION_RESET_SUCCESS,
     SUBSCRIPTION_SUSPENDED_DEVICES,
     TRIAL_ACTIVATED,
     TRIAL_ALREADY_USED,
 )
 from src.core.config import Settings
-from src.core.enums import SubscriptionStatus, SuspensionReason
+from src.core.enums import PaymentMethod, PaymentStatus, SubscriptionStatus, SuspensionReason
 from src.core.utils import build_subscription_url, format_datetime_ru, format_duration_until
 from src.repositories import PlanRepository, UserRepository
 from src.services import SubscriptionService
 from src.services.devices import DeviceService
+from src.services.payment import PaymentService
 from src.services.pricing import PurchasePricingService
 from src.services.promo import PromoCodeService
 
@@ -198,6 +203,8 @@ async def confirm_purchase(
             plan.price,
             promo_id=pricing.promo.promo.id if pricing.promo else None,
             final_price=pricing.final_price,
+            balance=user.balance,
+            yookassa_enabled=settings.yookassa_enabled,
         ),
     )
     await callback.answer()
@@ -296,12 +303,14 @@ async def apply_promo_code(
             plan.price,
             promo_id=pricing.promo.promo.id if pricing.promo else None,
             final_price=pricing.final_price,
+            balance=user.balance,
+            yookassa_enabled=settings.yookassa_enabled,
         ),
     )
 
 
 @router.callback_query(F.data.startswith("sub:confirm:"))
-async def process_purchase(
+async def process_purchase_balance(
     callback: CallbackQuery,
     session: AsyncSession,
     settings: Settings,
@@ -336,7 +345,9 @@ async def process_purchase(
 
     service = SubscriptionService(session, settings)
     try:
-        sub = await service.extend_subscription(user.id, plan.id, promo_code_id=promo_id)
+        sub = await service.extend_subscription(
+            user.id, plan.id, payment_method=PaymentMethod.BALANCE, promo_code_id=promo_id
+        )
     except ValueError as e:
         await callback.answer(str(e), show_alert=True)
         return
@@ -349,3 +360,102 @@ async def process_purchase(
     )
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_to_menu())
     await callback.answer("✅ Подписка оформлена!")
+
+
+@router.callback_query(F.data.startswith("sub:pay:yookassa:"))
+async def process_purchase_yookassa(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    settings: Settings,
+    state: FSMContext,
+):
+    await state.clear()
+    if not settings.yookassa_enabled:
+        await callback.answer("Оплата через ЮKassa недоступна", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    plan_id = int(parts[3])
+    promo_id = int(parts[4]) if len(parts) > 4 else None
+
+    repo = UserRepository(session)
+    user = await repo.get_by_telegram_id(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала нажмите /start", show_alert=True)
+        return
+
+    plan = await PlanRepository(session).get_by_id(plan_id)
+    if not plan:
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+
+    payment_service = PaymentService(session, settings)
+    try:
+        order = await payment_service.create_purchase(user.id, plan_id, promo_code_id=promo_id)
+    except ValueError as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+
+    from src.bot.keyboards.inline import deposit_payment_keyboard
+
+    text = PURCHASE_PAYMENT_CREATED.format(
+        plan_name=plan.name,
+        amount=order.amount,
+        payment_url=order.payment_url,
+    )
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=deposit_payment_keyboard(order.id, order.payment_url),
+        disable_web_page_preview=True,
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "sub:reset")
+async def ask_reset_subscription(
+    callback: CallbackQuery, session: AsyncSession, settings: Settings
+):
+    repo = UserRepository(session)
+    user = await repo.get_by_telegram_id(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала нажмите /start", show_alert=True)
+        return
+
+    service = SubscriptionService(session, settings)
+    sub = await service.get_user_subscription(user.id)
+    if not sub:
+        await callback.answer("Нет активной подписки", show_alert=True)
+        return
+
+    from src.bot.keyboards.inline import reset_subscription_confirm
+
+    await callback.message.edit_text(
+        SUBSCRIPTION_RESET_CONFIRM,
+        parse_mode="HTML",
+        reply_markup=reset_subscription_confirm(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "sub:reset:confirm")
+async def confirm_reset_subscription(
+    callback: CallbackQuery, session: AsyncSession, settings: Settings
+):
+    repo = UserRepository(session)
+    user = await repo.get_by_telegram_id(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала нажмите /start", show_alert=True)
+        return
+
+    service = SubscriptionService(session, settings)
+    try:
+        sub = await service.reset_subscription_link(user.id)
+    except ValueError as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+
+    sub_url = build_subscription_url(settings.hub_domain, sub.subscription_token)
+    text = SUBSCRIPTION_RESET_SUCCESS.format(subscription_url=sub_url)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_to_menu())
+    await callback.answer("✅ Ссылка обновлена!")

@@ -588,6 +588,23 @@ class AdminService:
 
         service = SubscriptionService(self.session, settings)
         await service.sync_xray_clients()
+
+        user = await self.get_user_by_id(user_id)
+        if user and settings.bot_token:
+            from src.core.utils import format_datetime_ru
+            from src.services.notifications import send_telegram_message
+
+            sub_url = build_subscription_url(settings.hub_domain, subscription.subscription_token)
+            await send_telegram_message(
+                settings,
+                user.telegram_id,
+                (
+                    f"🎁 <b>Подписка продлена администратором</b>\n\n"
+                    f"➕ Добавлено: <b>{days} дн.</b>\n"
+                    f"📅 Активна до: <b>{format_datetime_ru(subscription.expires_at)}</b>\n\n"
+                    f"🔗 Ссылка:\n<code>{sub_url}</code>"
+                ),
+            )
         return True
 
     async def ban_user(self, user_id: int, banned: bool = True) -> User | None:
@@ -634,22 +651,115 @@ class AdminService:
         await service.sync_xray_clients()
         return True
 
-    async def adjust_balance(self, user_id: int, amount: Decimal, description: str) -> None:
+    async def adjust_balance(
+        self, user_id: int, amount: Decimal, description: str, settings: Settings
+    ) -> Transaction | None:
         from src.services import BalanceService
+        from src.services.notifications import send_telegram_message
+
+        user = await self.get_user_by_id(user_id)
+        if not user:
+            return None
 
         service = BalanceService(self.session)
-        await service.add_balance(
+        tx = await service.add_balance(
             user_id,
             amount,
             description,
             tx_type=TransactionType.ADMIN_ADJUSTMENT,
         )
 
+        if settings.bot_token:
+            sign = "+" if amount > 0 else ""
+            await send_telegram_message(
+                settings,
+                user.telegram_id,
+                (
+                    f"💰 <b>Баланс изменён администратором</b>\n\n"
+                    f"Сумма: <b>{sign}{amount} ₽</b>\n"
+                    f"Текущий баланс: <b>{tx.balance_after} ₽</b>\n"
+                    f"💬 {description}"
+                ),
+            )
+        return tx
+
     async def list_plans(self) -> list[SubscriptionPlan]:
         result = await self.session.execute(
             select(SubscriptionPlan).order_by(SubscriptionPlan.sort_order)
         )
         return list(result.scalars().all())
+
+    async def create_plan(
+        self,
+        name: str,
+        days: int,
+        price: Decimal,
+        description: str | None = None,
+        traffic_limit_gb: int | None = None,
+        sort_order: int = 0,
+        is_active: bool = True,
+    ) -> SubscriptionPlan:
+        if not name.strip():
+            raise ValueError("Название обязательно")
+        if days <= 0:
+            raise ValueError("Количество дней должно быть больше 0")
+        if price <= 0:
+            raise ValueError("Цена должна быть больше 0")
+
+        from src.repositories import PlanRepository
+
+        plan = SubscriptionPlan(
+            name=name.strip(),
+            description=description.strip() if description else None,
+            days=days,
+            price=price,
+            traffic_limit_gb=traffic_limit_gb,
+            sort_order=sort_order,
+            is_active=is_active,
+        )
+        return await PlanRepository(self.session).create(plan)
+
+    async def update_plan(
+        self,
+        plan_id: int,
+        *,
+        name: str,
+        days: int,
+        price: Decimal,
+        description: str | None = None,
+        traffic_limit_gb: int | None = None,
+        sort_order: int = 0,
+        is_active: bool = True,
+    ) -> SubscriptionPlan | None:
+        from src.repositories import PlanRepository
+
+        repo = PlanRepository(self.session)
+        plan = await repo.get_by_id(plan_id)
+        if not plan:
+            return None
+        if days <= 0:
+            raise ValueError("Количество дней должно быть больше 0")
+        if price <= 0:
+            raise ValueError("Цена должна быть больше 0")
+
+        plan.name = name.strip()
+        plan.description = description.strip() if description else None
+        plan.days = days
+        plan.price = price
+        plan.traffic_limit_gb = traffic_limit_gb
+        plan.sort_order = sort_order
+        plan.is_active = is_active
+        return await repo.update(plan)
+
+    async def toggle_plan_active(self, plan_id: int) -> SubscriptionPlan | None:
+        from src.repositories import PlanRepository
+
+        repo = PlanRepository(self.session)
+        plan = await repo.get_by_id(plan_id)
+        if not plan:
+            return None
+        plan.is_active = not plan.is_active
+        return await repo.update(plan)
 
     async def list_servers(self) -> list[VpnServer]:
         result = await self.session.execute(

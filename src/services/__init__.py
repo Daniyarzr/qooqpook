@@ -70,6 +70,8 @@ class SubscriptionService:
         plan_id: int,
         payment_method: PaymentMethod = PaymentMethod.BALANCE,
         promo_code_id: int | None = None,
+        payment_order_id: int | None = None,
+        sync_xray: bool = True,
     ) -> Subscription:
         user = await self.users.get_by_id(user_id)
         plan = await self.plans.get_by_id(plan_id)
@@ -102,12 +104,30 @@ class SubscriptionService:
                     payment_method=payment_method,
                 )
             )
+        elif payment_method == PaymentMethod.YOOKASSA:
+            order_suffix = f" (#{payment_order_id})" if payment_order_id else ""
+            description = (
+                f"Оплата подписки: {plan.name}{pricing.description_suffix}{order_suffix}"
+            )
+            await self.transactions.create(
+                Transaction(
+                    user_id=user.id,
+                    type=TransactionType.SUBSCRIPTION_PAYMENT,
+                    amount=-price,
+                    balance_after=user.balance,
+                    description=description,
+                    payment_method=payment_method,
+                )
+            )
 
-        existing = await self.subscriptions.get_active_by_user(user_id)
+        existing = await self.subscriptions.get_manageable_by_user(user_id)
         now = utcnow()
+        if existing and existing.expires_at <= now and existing.status != SubscriptionStatus.SUSPENDED:
+            existing = None
 
         if existing:
-            existing.expires_at = extend_expiry(existing.expires_at, plan.days)
+            base = existing.expires_at if existing.expires_at > now else now
+            existing.expires_at = extend_expiry(base, plan.days)
             existing.status = SubscriptionStatus.ACTIVE
             existing.is_trial = False
             existing.plan_id = plan.id
@@ -139,6 +159,30 @@ class SubscriptionService:
                 pricing.promo,
             )
 
+        if sync_xray:
+            await self.sync_xray_clients()
+        return subscription
+
+    async def reset_subscription_link(self, user_id: int) -> Subscription:
+        subscription = await self.subscriptions.get_current_by_user(user_id)
+        if not subscription:
+            raise ValueError("No subscription")
+        if subscription.status == SubscriptionStatus.EXPIRED:
+            raise ValueError("Subscription expired")
+        if subscription.expires_at <= utcnow():
+            raise ValueError("Subscription expired")
+
+        subscription.subscription_token = generate_subscription_token()
+
+        cred_service = ConfigCredentialService(self.session, self.settings)
+        await cred_service.refresh_subscription(subscription)
+
+        from src.services.device_limit import DeviceLimitService
+
+        limit_service = DeviceLimitService(self.session, self.settings)
+        await limit_service.clear_hwids(subscription.id)
+
+        await self.session.flush()
         await self.sync_xray_clients()
         return subscription
 
@@ -230,37 +274,23 @@ class SubscriptionService:
             )
 
         configs = []
-        user_label = (
-            subscription.user.first_name or subscription.user.id
-            if subscription.user
-            else subscription.user_id
-        )
         if vless_credentials:
             for credential in vless_credentials:
-                device_name = credential.device.name if credential.device else "Device"
-                configs.append(
-                    build_vless_link(
-                        credential.client_uuid,
-                        sanitize_remark(f"QooQ VPN {user_label} {device_name}"),
+                name = (
+                    sanitize_remark(credential.vpn_config.name)
+                    if credential.vpn_config and credential.vpn_config.name
+                    else sanitize_remark(
+                        credential.device.name if credential.device else "Device"
                     )
                 )
+                configs.append(build_vless_link(credential.client_uuid, name))
         else:
             devices = list(subscription.devices) if subscription.devices else []
             if devices:
                 for device in devices:
-                    configs.append(
-                        build_vless_link(
-                            device.client_uuid,
-                            sanitize_remark(f"QooQ VPN {user_label} {device.name}"),
-                        )
-                    )
+                    configs.append(build_vless_link(device.client_uuid, sanitize_remark(device.name)))
             else:
-                configs.append(
-                    build_vless_link(
-                        subscription.client_uuid,
-                        sanitize_remark(f"QooQ VPN {user_label}"),
-                    )
-                )
+                configs.append(build_vless_link(subscription.client_uuid, "Default"))
 
         return {
             "active": True,

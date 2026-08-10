@@ -13,7 +13,13 @@ VPN_HOST = "51.250.32.123"
 VPN_PORT = 443
 VPN_SNI = "white2.qooqvpn.ru"
 VPN_NETWORK = "tcp"
-DEFAULT_REMARK = "QooQ VPN RU-Tunnel"
+PANEL_TUNNEL_HOST = "148.135.184.188"
+PANEL_TUNNEL_PORT = 10086
+
+SUBSCRIPTION_PROFILE_TITLE = "QOOQ VPN 🚀⚡"
+SUBSCRIPTION_BOT_USERNAME = "qooqvpnbot"
+SUBSCRIPTION_REMARK = "QOOQ VPN"
+DEFAULT_REMARK = SUBSCRIPTION_REMARK
 
 RU_DOMAINS = [
     "domain:vk.ru",
@@ -211,10 +217,34 @@ def sanitize_remark(remark: str) -> str:
     cleaned = cleaned.encode("ascii", "ignore").decode("ascii")
     cleaned = re.sub(r"[^\w\s\-_.]", "", cleaned)
     cleaned = re.sub(r"\s+", "-", cleaned).strip("-_ ")
-    return cleaned or DEFAULT_REMARK
+    return cleaned or SUBSCRIPTION_REMARK
 
 
-def build_vless_link(client_uuid: uuid.UUID, remark: str = DEFAULT_REMARK) -> str:
+def encode_vless_fragment(name: str) -> str:
+    """URL-encoded name for VLESS link fragment (#name). Supports emoji."""
+    return quote(name, safe="")
+
+
+def encode_profile_title_header(title: str = SUBSCRIPTION_PROFILE_TITLE) -> str:
+    """Happ: profile-title as base64 UTF-8 (latin-1 safe HTTP header)."""
+    return f"base64:{base64.b64encode(title.encode('utf-8')).decode('ascii')}"
+
+
+def get_vpn_architecture_info() -> dict[str, str | int]:
+    return {
+        "profile_title": SUBSCRIPTION_PROFILE_TITLE,
+        "entry_host": VPN_HOST,
+        "entry_port": VPN_PORT,
+        "entry_sni": VPN_SNI,
+        "tunnel_host": PANEL_TUNNEL_HOST,
+        "tunnel_port": PANEL_TUNNEL_PORT,
+    }
+
+
+def build_vless_link(
+    client_uuid: uuid.UUID,
+    remark: str = DEFAULT_REMARK,
+) -> str:
     """VLESS TLS share link — Yandex tunnel entry."""
     name = quote(sanitize_remark(remark), safe="")
     params = (

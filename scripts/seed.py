@@ -13,6 +13,7 @@ from src.db.session import async_session_factory
 from src.core.enums import VpnConfigType
 from src.models import AdminUser, SubscriptionPlan, VpnConfig, VpnServer
 from src.services.vpn_config_store import VpnConfigStore, export_default_json_template
+from src.services.vpn_servers_sync import sync_vpn_servers
 
 
 async def seed():
@@ -59,29 +60,21 @@ async def seed():
             session.add_all(plans)
             print("✅ Subscription plans created")
 
-        # Demo VPN server
+        # Demo VPN server (only if empty DB)
         result = await session.execute(select(VpnServer).limit(1))
         if not result.scalar_one_or_none():
             server = VpnServer(
-                name="Main Server",
-                country="Germany",
-                country_flag="🇩🇪",
-                host=settings.hub_domain,
-                port=10086,
-                protocol="vless",
-                max_users=50,
-                sort_order=1,
+                name="Yandex Entry (точка входа)",
+                country="Russia",
+                country_flag="🇷🇺",
+                host="51.250.32.123",
+                port=443,
+                protocol="vless+tls",
+                max_users=500,
+                sort_order=0,
             )
             session.add(server)
             await session.flush()
-
-            config = VpnConfig(
-                server_id=server.id,
-                name="VLESS Reality",
-                config_type=VpnConfigType.VLESS_LINK,
-                config_template="vless://{uuid}@{host}:{port}?type=tcp&security=reality#{name}",
-            )
-            session.add(config)
 
             json_config = VpnConfig(
                 server_id=server.id,
@@ -91,15 +84,11 @@ async def seed():
                 is_default=True,
             )
             session.add(json_config)
-            print("✅ Demo VPN server created")
+            print("✅ VPN entry server created")
 
-        result = await session.execute(select(VpnServer))
-        servers = list(result.scalars().all())
-        store = VpnConfigStore(session)
-        for server in servers:
-            seeded = await store.seed_default_json_for_server(server.id)
-            if seeded:
-                print(f"✅ Default Xray JSON config for server {server.name}")
+        sync_messages = await sync_vpn_servers(session)
+        for msg in sync_messages:
+            print(msg)
 
         await session.commit()
         print("\n🎉 Seed completed!")

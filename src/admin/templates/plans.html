@@ -2,6 +2,36 @@
 {% block title %}Тарифы{% endblock %}
 {% block content %}
 <h2>💎 Тарифные планы</h2>
+
+{% if error %}
+<p class="muted" style="color:#e74c3c;margin-bottom:16px;">⚠️ {{ error }}</p>
+{% endif %}
+{% if success == 'created' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Тариф создан</p>
+{% elif success == 'updated' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Тариф обновлён</p>
+{% endif %}
+
+<section class="card" style="margin-bottom:24px;">
+    <h3>Добавить тариф</h3>
+    <form method="post" action="/plans/create" class="inline-form" style="flex-direction:column;align-items:stretch;">
+        <div class="inline-form">
+            <input type="text" name="name" placeholder="Название" class="input-sm" required>
+            <input type="number" name="days" min="1" placeholder="Дней" class="input-sm" required>
+            <input type="number" name="price" step="0.01" min="0.01" placeholder="Цена ₽" class="input-sm" required>
+            <input type="number" name="sort_order" value="0" placeholder="Порядок" class="input-sm">
+        </div>
+        <div class="inline-form">
+            <input type="text" name="description" placeholder="Описание" class="input-sm" style="flex:1;">
+            <input type="number" name="traffic_limit_gb" min="1" placeholder="Лимит ГБ (пусто = ∞)" class="input-sm">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                <input type="checkbox" name="is_active" value="true" checked> Активен
+            </label>
+            <button type="submit" class="btn-sm btn-success">➕ Создать</button>
+        </div>
+    </form>
+</section>
+
 <table>
     <thead>
         <tr>
@@ -9,27 +39,61 @@
             <th>Название</th>
             <th>Дней</th>
             <th>Цена</th>
+            <th>Лимит</th>
+            <th>Порядок</th>
             <th>Статус</th>
+            <th>Редактирование</th>
         </tr>
     </thead>
     <tbody>
         {% for plan in plans %}
         <tr>
             <td>{{ plan.id }}</td>
-            <td>{{ plan.name }}</td>
+            <td>
+                <strong>{{ plan.name }}</strong>
+                {% if plan.description %}
+                <div class="muted">{{ plan.description }}</div>
+                {% endif %}
+            </td>
             <td>{{ plan.days }}</td>
             <td>{{ plan.price }} ₽</td>
+            <td>{% if plan.traffic_limit_gb %}{{ plan.traffic_limit_gb }} ГБ{% else %}∞{% endif %}</td>
+            <td>{{ plan.sort_order }}</td>
             <td>
                 {% if plan.is_active %}
                 <span class="badge badge-green">Активен</span>
                 {% else %}
-                <span class="badge badge-red">Неактивен</span>
+                <span class="badge badge-red">Скрыт</span>
                 {% endif %}
+            </td>
+            <td>
+                <details>
+                    <summary class="btn-sm">✏️ Изменить</summary>
+                    <form method="post" action="/plans/{{ plan.id }}/update" style="margin-top:12px;display:flex;flex-direction:column;gap:8px;min-width:280px;">
+                        <input type="text" name="name" value="{{ plan.name }}" class="input-sm" required>
+                        <input type="text" name="description" value="{{ plan.description or '' }}" class="input-sm" placeholder="Описание">
+                        <div class="inline-form">
+                            <input type="number" name="days" value="{{ plan.days }}" min="1" class="input-sm" required>
+                            <input type="number" name="price" value="{{ plan.price }}" step="0.01" min="0.01" class="input-sm" required>
+                        </div>
+                        <div class="inline-form">
+                            <input type="number" name="traffic_limit_gb" value="{{ plan.traffic_limit_gb or '' }}" class="input-sm" placeholder="Лимит ГБ">
+                            <input type="number" name="sort_order" value="{{ plan.sort_order }}" class="input-sm">
+                        </div>
+                        <label style="font-size:13px;">
+                            <input type="checkbox" name="is_active" value="true" {% if plan.is_active %}checked{% endif %}> Активен
+                        </label>
+                        <button type="submit" class="btn-sm btn-success">💾 Сохранить</button>
+                    </form>
+                    <form method="post" action="/plans/{{ plan.id }}/toggle" style="margin-top:8px;">
+                        <button type="submit" class="btn-sm">{% if plan.is_active %}👁 Скрыть{% else %}✅ Показать{% endif %}</button>
+                    </form>
+                </details>
             </td>
         </tr>
         {% endfor %}
         {% if not plans %}
-        <tr><td colspan="5" style="text-align:center;color:#8b949e;">Тарифы не настроены. Добавьте через seed или API.</td></tr>
+        <tr><td colspan="8" style="text-align:center;color:#8b949e;">Тарифы не настроены</td></tr>
         {% endif %}
     </tbody>
 </table>

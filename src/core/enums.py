@@ -48,3 +48,8 @@ class PaymentStatus(str, enum.Enum):
     PENDING = "pending"
     SUCCEEDED = "succeeded"
     CANCELED = "canceled"
+
+
+class PaymentOrderPurpose(str, enum.Enum):
+    DEPOSIT = "deposit"
+    SUBSCRIPTION = "subscription"

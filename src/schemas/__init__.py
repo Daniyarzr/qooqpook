@@ -130,6 +130,8 @@ class MiniAppSettingsRead(BaseModel):
     trial_days: int
     max_devices: int
     deposit_amounts: list[int]
+    deposit_min_amount: int
+    deposit_max_amount: int
     yookassa_enabled: bool
     bot_username: str
     referral_welcome: bool = False
@@ -148,6 +150,21 @@ class MiniAppBootstrapResponse(BaseModel):
 class MiniAppPurchaseRequest(BaseModel):
     plan_id: int
     promo_code_id: int | None = None
+    payment_method: PaymentMethod = PaymentMethod.BALANCE
+
+
+class MiniAppPurchasePaymentResponse(BaseModel):
+    order_id: int
+    payment_url: str
+    amount: Decimal
+    status: PaymentStatus
+
+
+class MiniAppPaymentStatusResponse(BaseModel):
+    order_id: int
+    status: PaymentStatus
+    balance: Decimal | None = None
+    subscription: MiniAppSubscriptionRead | None = None
 
 
 class MiniAppPromoValidateRequest(BaseModel):

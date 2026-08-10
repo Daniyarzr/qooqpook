@@ -174,6 +174,19 @@ class PlanRepository:
         )
         return result.scalar_one_or_none()
 
+    async def create(self, plan: SubscriptionPlan) -> SubscriptionPlan:
+        self.session.add(plan)
+        await self.session.flush()
+        return plan
+
+    async def update(self, plan: SubscriptionPlan) -> SubscriptionPlan:
+        await self.session.flush()
+        return plan
+
+    async def delete(self, plan: SubscriptionPlan) -> None:
+        await self.session.delete(plan)
+        await self.session.flush()
+
 
 class TransactionRepository:
     def __init__(self, session: AsyncSession):

@@ -60,6 +60,9 @@ def subscription_menu(
         buttons.append(
             [InlineKeyboardButton(text="🔄 Продлить", callback_data="sub:plans")]
         )
+        buttons.append(
+            [InlineKeyboardButton(text="🔐 Сбросить ссылку", callback_data="sub:reset")]
+        )
     else:
         buttons.append(
             [InlineKeyboardButton(text="💎 Купить подписку", callback_data="sub:plans")]
@@ -118,21 +121,49 @@ def confirm_purchase(
     price,
     promo_id: int | None = None,
     final_price=None,
+    balance=None,
+    yookassa_enabled: bool = False,
 ) -> InlineKeyboardMarkup:
     pay_price = final_price if final_price is not None else price
     if promo_id:
         confirm_data = f"sub:confirm:{plan_id}:{promo_id}"
+        yookassa_data = f"sub:pay:yookassa:{plan_id}:{promo_id}"
     else:
         confirm_data = f"sub:confirm:{plan_id}"
+        yookassa_data = f"sub:pay:yookassa:{plan_id}"
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    buttons = []
+    can_balance = balance is not None and balance >= pay_price
+    if can_balance:
+        buttons.append(
             [
                 InlineKeyboardButton(
-                    text=f"✅ Оплатить {pay_price} ₽ с баланса",
+                    text=f"💰 Списать {pay_price} ₽ с баланса",
                     callback_data=confirm_data,
                 )
-            ],
+            ]
+        )
+    if yookassa_enabled:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"💳 Оплатить {pay_price} ₽ (ЮKassa)",
+                    callback_data=yookassa_data,
+                )
+            ]
+        )
+    if not can_balance and not yookassa_enabled:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"❌ Недостаточно средств ({pay_price} ₽)",
+                    callback_data="balance",
+                )
+            ]
+        )
+
+    buttons.extend(
+        [
             [
                 InlineKeyboardButton(
                     text="🎟 Ввести промокод",
@@ -142,6 +173,7 @@ def confirm_purchase(
             [InlineKeyboardButton(text="◀️ Назад к тарифам", callback_data="sub:plans")],
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def balance_menu(topup_enabled: bool = False) -> InlineKeyboardMarkup:
@@ -174,6 +206,9 @@ def deposit_amounts_keyboard(amounts: list[int]) -> InlineKeyboardMarkup:
             row = []
     if row:
         buttons.append(row)
+    buttons.append(
+        [InlineKeyboardButton(text="✏️ Другая сумма", callback_data="balance:topup:custom")]
+    )
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="balance")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -184,5 +219,14 @@ def deposit_payment_keyboard(order_id: int, payment_url: str) -> InlineKeyboardM
             [InlineKeyboardButton(text="💳 Оплатить", url=payment_url)],
             [InlineKeyboardButton(text="🔄 Проверить оплату", callback_data=f"balance:check:{order_id}")],
             [InlineKeyboardButton(text="◀️ К балансу", callback_data="balance")],
+        ]
+    )
+
+
+def reset_subscription_confirm() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, сбросить", callback_data="sub:reset:confirm")],
+            [InlineKeyboardButton(text="◀️ Отмена", callback_data="sub:status")],
         ]
     )

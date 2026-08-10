@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps.miniapp_auth import get_or_create_miniapp_user
 from src.core.config import Settings, get_settings
-from src.core.enums import PaymentStatus, SubscriptionStatus, SuspensionReason
+from src.core.enums import PaymentMethod, PaymentStatus, SubscriptionStatus, SuspensionReason
 from src.core.utils import (
     build_referral_link,
     build_subscription_url,
@@ -21,8 +21,10 @@ from src.schemas import (
     MiniAppDepositResponse,
     MiniAppDepositStatusResponse,
     MiniAppDeviceRead,
+    MiniAppPaymentStatusResponse,
     MiniAppPromoValidateRequest,
     MiniAppPromoValidateResponse,
+    MiniAppPurchasePaymentResponse,
     MiniAppPurchaseRequest,
     MiniAppReferralRead,
     MiniAppSettingsRead,
@@ -131,6 +133,8 @@ async def build_bootstrap(
             trial_days=settings.trial_days,
             max_devices=settings.max_devices_per_subscription,
             deposit_amounts=settings.deposit_amounts,
+            deposit_min_amount=settings.deposit_min_amount,
+            deposit_max_amount=settings.deposit_max_amount,
             yookassa_enabled=settings.yookassa_enabled,
             bot_username=settings.bot_username,
             referral_welcome=referral_welcome,
@@ -168,7 +172,7 @@ async def activate_trial(
     return await build_bootstrap(session, settings, user)
 
 
-@router.post("/purchase", response_model=MiniAppBootstrapResponse)
+@router.post("/purchase")
 async def purchase_plan(
     body: MiniAppPurchaseRequest,
     auth: tuple[User, bool] = Depends(get_or_create_miniapp_user),
@@ -187,6 +191,23 @@ async def purchase_plan(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    if body.payment_method == PaymentMethod.YOOKASSA:
+        if not settings.yookassa_enabled:
+            raise HTTPException(status_code=503, detail="YooKassa payments unavailable")
+        payment_service = PaymentService(session, settings)
+        try:
+            order = await payment_service.create_purchase(
+                user.id, plan.id, promo_code_id=body.promo_code_id
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return MiniAppPurchasePaymentResponse(
+            order_id=order.id,
+            payment_url=order.payment_url or "",
+            amount=order.amount,
+            status=order.status,
+        )
+
     if user.balance < pricing.final_price:
         raise HTTPException(
             status_code=400,
@@ -195,12 +216,63 @@ async def purchase_plan(
 
     service = SubscriptionService(session, settings)
     try:
-        await service.extend_subscription(user.id, plan.id, promo_code_id=body.promo_code_id)
+        await service.extend_subscription(
+            user.id,
+            plan.id,
+            payment_method=PaymentMethod.BALANCE,
+            promo_code_id=body.promo_code_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     user = await UserRepository(session).get_by_id(user.id)
     return await build_bootstrap(session, settings, user)
+
+
+@router.post("/subscription/reset", response_model=MiniAppBootstrapResponse)
+async def reset_subscription(
+    auth: tuple[User, bool] = Depends(get_or_create_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+):
+    user, _ = auth
+    service = SubscriptionService(session, settings)
+    try:
+        await service.reset_subscription_link(user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    user = await UserRepository(session).get_by_id(user.id)
+    return await build_bootstrap(session, settings, user)
+
+
+@router.get("/payment/{order_id}", response_model=MiniAppPaymentStatusResponse)
+async def check_payment(
+    order_id: int,
+    auth: tuple[User, bool] = Depends(get_or_create_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+):
+    user, _ = auth
+    service = PaymentService(session, settings)
+    order = await service.check_order(order_id, user.id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    balance = None
+    subscription = None
+    if order.status == PaymentStatus.SUCCEEDED:
+        refreshed_user = await UserRepository(session).get_by_id(user.id)
+        balance = refreshed_user.balance if refreshed_user else None
+        sub_read, _ = await _build_subscription_read(session, settings, user.id)
+        subscription = sub_read
+
+    return MiniAppPaymentStatusResponse(
+        order_id=order.id,
+        status=order.status,
+        balance=balance,
+        subscription=subscription,
+    )
 
 
 @router.post("/promo/validate", response_model=MiniAppPromoValidateResponse)

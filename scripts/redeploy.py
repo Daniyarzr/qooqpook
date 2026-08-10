@@ -33,7 +33,7 @@ def main() -> int:
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(HOST, username=USER, password=PASSWORD, timeout=15)
+    client.connect(HOST, username=USER, password=PASSWORD, timeout=30, banner_timeout=30)
 
     sftp = client.open_sftp()
     sftp.put(tar_path, "/tmp/qooq-vpn.tar.gz")
