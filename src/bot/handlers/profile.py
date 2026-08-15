@@ -127,7 +127,7 @@ async def show_referral(callback: CallbackQuery, session: AsyncSession, settings
     bonus_percent = await settings_service.get_referral_bonus_percent()
     total_earned = await referral_service.total_bonus_earned(user.id)
 
-    referral_link = build_referral_link(settings.bot_username, user.referral_code)
+    referral_link = build_referral_link(settings.bot_username, user.telegram_id)
     text = REFERRAL.format(
         referral_link=referral_link,
         bonus_percent=bonus_percent,
@@ -139,6 +139,7 @@ async def show_referral(callback: CallbackQuery, session: AsyncSession, settings
 
 
 @router.callback_query(F.data == "help")
-async def show_help(callback: CallbackQuery):
-    await callback.message.edit_text(HELP, parse_mode="HTML", reply_markup=back_to_menu())
+async def show_help(callback: CallbackQuery, settings: Settings):
+    text = HELP.format(support_username=settings.support_username.lstrip("@"))
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_to_menu())
     await callback.answer()

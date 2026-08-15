@@ -1,9 +1,15 @@
-from aiogram import Router
-from aiogram.filters import Command, CommandStart
+from aiogram import F, Router
+from aiogram.filters import CommandStart, StateFilter
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.bot.keyboards.inline import main_menu
+from src.bot.helpers.menu import (
+    is_bot_admin,
+    is_main_menu_keyboard_text,
+    send_main_menu,
+    show_main_menu_callback,
+)
 from src.bot.texts.messages import BANNED, REFERRAL_WELCOME, WELCOME, WELCOME_BACK
 from src.core.config import Settings
 from src.repositories import UserRepository
@@ -12,22 +18,23 @@ from src.services.system_settings import SystemSettingsService
 router = Router(name="start")
 
 
-@router.message(CommandStart())
-async def cmd_start(message: Message, session: AsyncSession, settings: Settings):
+async def _send_start_menu(
+    message: Message,
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    referral_code: str | None = None,
+) -> None:
     repo = UserRepository(session)
     user = await repo.get_by_telegram_id(message.from_user.id)
-
-    referral_code = None
-    if message.text and " " in message.text:
-        args = message.text.split(maxsplit=1)[1]
-        if args.startswith("ref_"):
-            referral_code = args[4:]
 
     if not user:
         referred_by_id = None
         if referral_code:
-            referrer = await repo.get_by_referral_code(referral_code)
-            if referrer:
+            referrer = await repo.resolve_referrer(
+                referral_code if referral_code.startswith("ref_") else f"ref_{referral_code}"
+            )
+            if referrer and referrer.telegram_id != message.from_user.id:
                 referred_by_id = referrer.id
 
         user = await repo.create(
@@ -46,30 +53,55 @@ async def cmd_start(message: Message, session: AsyncSession, settings: Settings)
         text = WELCOME_BACK.format(name=name)
 
     if user.is_banned:
-        await message.answer(BANNED, parse_mode="HTML")
+        await message.answer(
+            BANNED.format(support_username=settings.support_username.lstrip("@")),
+            parse_mode="HTML",
+        )
         return
 
-    await message.answer(
+    await send_main_menu(
+        message,
+        settings,
         text,
-        parse_mode="HTML",
-        reply_markup=main_menu(settings),
+        is_admin=await is_bot_admin(message.from_user.id, settings, session),
     )
+
+
+@router.message(CommandStart(), StateFilter("*"))
+async def cmd_start(
+    message: Message,
+    session: AsyncSession,
+    settings: Settings,
+    state: FSMContext,
+):
+    await state.clear()
+
+    referral_code = None
+    if message.text and " " in message.text:
+        args = message.text.split(maxsplit=1)[1]
+        if args.startswith("ref_"):
+            referral_code = args[4:]
+
+    await _send_start_menu(message, session, settings, referral_code=referral_code)
+
+
+@router.message(F.text.func(is_main_menu_keyboard_text), StateFilter("*"))
+async def keyboard_main_menu(
+    message: Message,
+    session: AsyncSession,
+    settings: Settings,
+    state: FSMContext,
+):
+    """Reply keyboard button from BotFather (text «Главное меню»)."""
+    await state.clear()
+    await _send_start_menu(message, session, settings)
 
 
 @router.callback_query(lambda c: c.data == "menu:main")
-async def show_main_menu(callback: CallbackQuery, settings: Settings):
-    await callback.message.edit_text(
-        WELCOME,
-        parse_mode="HTML",
-        reply_markup=main_menu(settings),
+async def show_main_menu(callback: CallbackQuery, settings: Settings, session: AsyncSession):
+    await show_main_menu_callback(
+        callback,
+        settings,
+        is_admin=await is_bot_admin(callback.from_user.id, settings, session),
     )
     await callback.answer()
-
-
-@router.message(Command("menu"))
-async def cmd_menu(message: Message, settings: Settings):
-    await message.answer(
-        WELCOME,
-        parse_mode="HTML",
-        reply_markup=main_menu(settings),
-    )

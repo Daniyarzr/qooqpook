@@ -1,6 +1,6 @@
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.bot.keyboards.inline import back_to_menu, subscription_menu
@@ -61,14 +61,11 @@ async def _resolve_display_pricing(session, settings, user_id, plan, promo_id=No
     return await PurchasePricingService(session, settings).resolve(user_id, plan, promo_id)
 
 
-@router.callback_query(F.data == "sub:status")
-async def subscription_status(callback: CallbackQuery, session: AsyncSession, settings: Settings):
-    repo = UserRepository(session)
-    user = await repo.get_by_telegram_id(callback.from_user.id)
-    if not user:
-        await callback.answer("Сначала нажмите /start", show_alert=True)
-        return
-
+async def _resolve_subscription_view(
+    session: AsyncSession,
+    settings: Settings,
+    user,
+) -> tuple[str, InlineKeyboardMarkup]:
     service = SubscriptionService(session, settings)
     sub = await service.subscriptions.get_current_by_user(user.id)
 
@@ -77,23 +74,16 @@ async def subscription_status(callback: CallbackQuery, session: AsyncSession, se
             text = SUBSCRIPTION_SUSPENDED_DEVICES.format(
                 max_devices=settings.max_devices_per_subscription,
             )
-            await callback.message.edit_text(
-                text,
-                parse_mode="HTML",
-                reply_markup=subscription_menu(False, user.trial_used, suspended_device_limit=True),
-            )
-        else:
-            from src.bot.texts.messages import SUBSCRIPTION_SUSPENDED
-            await callback.message.edit_text(
-                SUBSCRIPTION_SUSPENDED,
-                parse_mode="HTML",
-                reply_markup=back_to_menu(),
-            )
-        await callback.answer()
-        return
+            return text, subscription_menu(False, user.trial_used, suspended_device_limit=True)
+        from src.bot.texts.messages import SUBSCRIPTION_SUSPENDED
+        return (
+            SUBSCRIPTION_SUSPENDED.format(
+                support_username=settings.support_username.lstrip("@")
+            ),
+            back_to_menu(),
+        )
 
     sub = await service.get_user_subscription(user.id)
-
     if sub:
         sub_url = build_subscription_url(settings.hub_domain, sub.subscription_token)
         device_service = DeviceService(session, settings)
@@ -107,16 +97,26 @@ async def subscription_status(callback: CallbackQuery, session: AsyncSession, se
             device_count=len(devices),
             max_devices=settings.max_devices_per_subscription,
         )
-        has_sub = True
-    else:
-        text = SUBSCRIPTION_NONE
-        has_sub = False
+        return text, subscription_menu(True, user.trial_used)
 
-    await callback.message.edit_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=subscription_menu(has_sub, user.trial_used),
-    )
+    return SUBSCRIPTION_NONE, subscription_menu(False, user.trial_used)
+
+
+@router.callback_query(F.data == "sub:status")
+async def subscription_status(callback: CallbackQuery, session: AsyncSession, settings: Settings):
+    repo = UserRepository(session)
+    user = await repo.get_by_telegram_id(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала нажмите /start", show_alert=True)
+        return
+
+    text, markup = await _resolve_subscription_view(session, settings, user)
+    from aiogram.exceptions import TelegramBadRequest
+
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+    except TelegramBadRequest:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=markup)
     await callback.answer()
 
 

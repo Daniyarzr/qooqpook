@@ -76,7 +76,7 @@ SUBSCRIPTION_SUSPENDED_DEVICES = """
 SUBSCRIPTION_SUSPENDED = """
 🔒 <b>Подписка приостановлена</b>
 
-Обратитесь в поддержку для восстановления доступа.
+Обратитесь в поддержку @{support_username} для восстановления доступа.
 """
 
 SUBSCRIPTION_EXPIRED = """
@@ -226,7 +226,7 @@ BALANCE = """
 Пополните баланс для оплаты подписок через ЮKassa.
 """
 
-DEPOSIT_NOT_CONFIGURED = "Пополнение временно недоступно. Обратитесь в поддержку."
+DEPOSIT_NOT_CONFIGURED = "Пополнение временно недоступно. Напишите @{support_username}."
 
 DEPOSIT_CREATED = """
 💳 <b>Счёт на оплату</b>
@@ -269,13 +269,13 @@ HELP = """
 💻 Windows — Hiddify, v2rayN
 🐧 Linux — v2rayA, Hiddify
 
-<b>Вопросы?</b> Напишите @support
+<b>Вопросы?</b> Напишите @{support_username}
 """
 
 BANNED = """
 🚫 <b>Доступ ограничен</b>
 
-Ваш аккаунт заблокирован. Обратитесь в поддержку.
+Ваш аккаунт заблокирован. Напишите в поддержку: @{support_username}
 """
 
 PAYMENT_SUCCESS = """

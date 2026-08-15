@@ -41,6 +41,15 @@ class ConfigCredentialService:
         )
         return result.scalar_one_or_none()
 
+    async def list_all_active_configs(self) -> list[VpnConfig]:
+        """All active VPN configs — each becomes a separate Happ server entry."""
+        result = await self.session.execute(
+            select(VpnConfig)
+            .where(VpnConfig.is_active.is_(True))
+            .order_by(VpnConfig.id)
+        )
+        return list(result.scalars().all())
+
     async def list_server_configs(self, server_id: int) -> list[VpnConfig]:
         result = await self.session.execute(
             select(VpnConfig)
@@ -55,10 +64,6 @@ class ConfigCredentialService:
     async def ensure_credentials(self, subscription: Subscription) -> list[SubscriptionConfigCredential]:
         from src.services.devices import DeviceService
 
-        server_id = await self.resolve_server_id(subscription)
-        if not server_id:
-            return []
-
         if self.settings:
             device_service = DeviceService(self.session, self.settings)
             devices = await device_service.list_devices(subscription.id)
@@ -67,9 +72,11 @@ class ConfigCredentialService:
         else:
             devices = list(subscription.devices) if subscription.devices else []
 
-        configs = await self.list_server_configs(server_id)
+        configs = await self.list_all_active_configs()
         if not configs:
             return []
+
+        active_config_ids = {config.id for config in configs}
 
         existing_result = await self.session.execute(
             select(SubscriptionConfigCredential)
@@ -79,12 +86,22 @@ class ConfigCredentialService:
             )
             .where(
                 SubscriptionConfigCredential.subscription_id == subscription.id,
-                SubscriptionConfigCredential.revoked_at.is_(None),
             )
         )
+        existing_items = list(existing_result.scalars().all())
+        existing_by_key = {
+            (item.device_id, item.vpn_config_id): item
+            for item in existing_items
+        }
+        now = utcnow()
+        for item in existing_items:
+            if item.revoked_at is None and item.vpn_config_id not in active_config_ids:
+                item.revoked_at = now
+
         existing = {
             (item.device_id, item.vpn_config_id): item
-            for item in existing_result.scalars().all()
+            for item in existing_items
+            if item.vpn_config_id in active_config_ids and item.revoked_at is None
         }
 
         created: list[SubscriptionConfigCredential] = []
@@ -93,13 +110,18 @@ class ConfigCredentialService:
                 key = (device.id, config.id)
                 if key in existing:
                     continue
-                credential = SubscriptionConfigCredential(
-                    subscription_id=subscription.id,
-                    device_id=device.id,
-                    vpn_config_id=config.id,
-                    client_uuid=uuid_std.uuid4(),
-                )
-                self.session.add(credential)
+                credential = existing_by_key.get(key)
+                if credential:
+                    credential.client_uuid = uuid_std.uuid4()
+                    credential.revoked_at = None
+                else:
+                    credential = SubscriptionConfigCredential(
+                        subscription_id=subscription.id,
+                        device_id=device.id,
+                        vpn_config_id=config.id,
+                        client_uuid=uuid_std.uuid4(),
+                    )
+                    self.session.add(credential)
                 created.append(credential)
                 existing[key] = credential
 
@@ -121,6 +143,7 @@ class ConfigCredentialService:
     ) -> list[SubscriptionConfigCredential]:
         query = (
             select(SubscriptionConfigCredential)
+            .join(VpnConfig)
             .options(
                 selectinload(SubscriptionConfigCredential.device),
                 selectinload(SubscriptionConfigCredential.vpn_config),
@@ -128,6 +151,7 @@ class ConfigCredentialService:
             .where(
                 SubscriptionConfigCredential.subscription_id == subscription_id,
                 SubscriptionConfigCredential.revoked_at.is_(None),
+                VpnConfig.is_active.is_(True),
             )
             .order_by(
                 SubscriptionConfigCredential.device_id,
@@ -137,7 +161,7 @@ class ConfigCredentialService:
         if vpn_config_id is not None:
             query = query.where(SubscriptionConfigCredential.vpn_config_id == vpn_config_id)
         if config_type is not None:
-            query = query.join(VpnConfig).where(VpnConfig.config_type == config_type)
+            query = query.where(VpnConfig.config_type == config_type)
 
         result = await self.session.execute(query)
         return list(result.scalars().unique().all())
@@ -198,14 +222,40 @@ class ConfigCredentialService:
             await self.session.flush()
         return len(credentials)
 
+    async def revoke_inactive_configs(self) -> int:
+        result = await self.session.execute(
+            select(SubscriptionConfigCredential)
+            .join(VpnConfig)
+            .where(
+                SubscriptionConfigCredential.revoked_at.is_(None),
+                VpnConfig.is_active.is_(False),
+            )
+        )
+        credentials = list(result.scalars().all())
+        now = utcnow()
+        for credential in credentials:
+            credential.revoked_at = now
+        if credentials:
+            await self.session.flush()
+            logger.info("Revoked %s credentials for inactive configs", len(credentials))
+        return len(credentials)
+
     async def get_all_for_active_subscriptions(self) -> list[SubscriptionConfigCredential]:
         result = await self.session.execute(
             select(SubscriptionConfigCredential)
-            .join(Subscription)
+            .join(
+                Subscription,
+                Subscription.id == SubscriptionConfigCredential.subscription_id,
+            )
+            .join(
+                VpnConfig,
+                VpnConfig.id == SubscriptionConfigCredential.vpn_config_id,
+            )
             .where(
                 Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL]),
                 Subscription.expires_at > utcnow(),
                 SubscriptionConfigCredential.revoked_at.is_(None),
+                VpnConfig.is_active.is_(True),
             )
             .options(
                 selectinload(SubscriptionConfigCredential.subscription),

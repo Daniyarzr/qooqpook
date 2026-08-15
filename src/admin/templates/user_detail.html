@@ -133,14 +133,6 @@
                 <dt>Окончание</dt><dd><strong>{{ subscription.expires_at.strftime('%d.%m.%Y %H:%M') }}</strong></dd>
                 <dt>UUID</dt><dd><code>{{ subscription.client_uuid }}</code></dd>
             <dt>Token</dt><dd><code style="font-size:11px">{{ subscription.subscription_token }}</code></dd>
-            <dt>Точка входа</dt>
-            <dd>
-                <code>{{ vpn_arch.entry_host }}:{{ vpn_arch.entry_port }}</code>
-                <span class="muted">TLS · {{ vpn_arch.entry_sni }}</span>
-            </dd>
-            <dt>Туннель</dt>
-            <dd><code>{{ vpn_arch.tunnel_host }}:{{ vpn_arch.tunnel_port }}</code> <span class="muted">внутренний hop</span></dd>
-            <dt>Имя в Happ</dt><dd><strong>{{ vpn_arch.profile_title }}</strong></dd>
             <dt>Ссылка</dt>
                 <dd><a href="{{ subscription_url }}" target="_blank" class="copy-link">{{ subscription_url }}</a></dd>
             </dl>
@@ -190,12 +182,7 @@
                 </table>
             </div>
             {% else %}
-            <p class="muted">Устройств нет.</p>
-            {% endif %}
-            {% if devices|length < max_devices and not device_limit_suspended %}
-            <form method="post" action="/users/{{ user.id }}/devices/add" style="margin-top:12px">
-                <button type="submit" class="btn btn-primary">➕ Добавить устройство</button>
-            </form>
+            <p class="muted">Устройство появится автоматически после добавления подписки в VPN-клиент.</p>
             {% endif %}
 
             <div class="panel-title" style="margin-top:20px"><span>🔌</span> HWID ({{ hwids|length }}/{{ max_devices }})</div>

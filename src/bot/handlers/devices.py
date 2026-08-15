@@ -81,31 +81,6 @@ async def show_devices(callback: CallbackQuery, session: AsyncSession, settings:
     await callback.answer()
 
 
-@router.callback_query(F.data == "sub:device:add")
-async def add_device(callback: CallbackQuery, session: AsyncSession, settings: Settings):
-    repo = UserRepository(session)
-    user = await repo.get_by_telegram_id(callback.from_user.id)
-    if not user:
-        await callback.answer("Сначала нажмите /start", show_alert=True)
-        return
-
-    sub_service = SubscriptionService(session, settings)
-    subscription = await sub_service.subscriptions.get_current_by_user(user.id)
-    if not subscription or subscription.status == SubscriptionStatus.SUSPENDED:
-        await callback.answer("Подписка недоступна", show_alert=True)
-        return
-
-    device_service = DeviceService(session, settings)
-    try:
-        await device_service.add_device(subscription)
-        await sub_service.sync_xray_clients()
-    except ValueError as exc:
-        await callback.answer(str(exc), show_alert=True)
-        return
-
-    await callback.answer("✅ Устройство добавлено")
-    await show_devices(callback, session, settings)
-
 
 @router.callback_query(F.data.startswith("sub:device:del:"))
 async def delete_device(callback: CallbackQuery, session: AsyncSession, settings: Settings):

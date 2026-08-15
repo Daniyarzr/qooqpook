@@ -65,8 +65,8 @@ async def get_or_create_miniapp_user(
     referred_by_id = None
     start_param = auth.start_param or ""
     if start_param.startswith("ref_"):
-        referrer = await repo.get_by_referral_code(start_param[4:])
-        if referrer:
+        referrer = await repo.resolve_referrer(start_param)
+        if referrer and referrer.telegram_id != auth.user.id:
             referred_by_id = referrer.id
 
     user = await repo.create(

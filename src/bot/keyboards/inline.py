@@ -3,27 +3,82 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from src.core.config import Settings
 
 
-def main_menu(settings: Settings) -> InlineKeyboardMarkup:
+def main_menu(settings: Settings, *, is_admin: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(text="📱 Моя подписка", callback_data="sub:status"),
+            InlineKeyboardButton(text="💎 Тарифы", callback_data="sub:plans"),
+        ],
+        [
+            InlineKeyboardButton(text="👤 Профиль", callback_data="profile"),
+            InlineKeyboardButton(text="💰 Баланс", callback_data="balance"),
+        ],
+        [
+            InlineKeyboardButton(text="🎁 Рефералы", callback_data="referral"),
+            InlineKeyboardButton(text="❓ Помощь", callback_data="help"),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🌐 Mini App",
+                web_app=WebAppInfo(url=settings.webapp_url),
+            ),
+        ],
+    ]
+    if is_admin:
+        rows.append([InlineKeyboardButton(text="🛠 Админ", callback_data="admin:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def to_main_menu_keyboard(settings: Settings) -> InlineKeyboardMarkup:
+    """Кнопка под сообщениями рассылки — открывает бота."""
+    username = (settings.bot_username or "qooqvpnbot").lstrip("@")
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="📱 Моя подписка", callback_data="sub:status"),
-                InlineKeyboardButton(text="💎 Тарифы", callback_data="sub:plans"),
-            ],
-            [
-                InlineKeyboardButton(text="👤 Профиль", callback_data="profile"),
-                InlineKeyboardButton(text="💰 Баланс", callback_data="balance"),
-            ],
-            [
-                InlineKeyboardButton(text="🎁 Рефералы", callback_data="referral"),
-                InlineKeyboardButton(text="❓ Помощь", callback_data="help"),
-            ],
-            [
                 InlineKeyboardButton(
-                    text="🌐 Mini App",
-                    web_app=WebAppInfo(url=settings.webapp_url),
-                ),
-            ],
+                    text="🏠 В главное меню",
+                    url=f"https://t.me/{username}?start=menu",
+                )
+            ]
+        ]
+    )
+
+
+def admin_panel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📣 Рассылка всем", callback_data="admin:broadcast:all")],
+            [InlineKeyboardButton(text="👤 Рассылка одному", callback_data="admin:broadcast:one")],
+            [InlineKeyboardButton(text="👥 Админы бота", callback_data="admin:admins")],
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu:main")],
+        ]
+    )
+
+
+def admin_list_keyboard(admin_ids: list[int], root_ids: set[int]) -> InlineKeyboardMarkup:
+    rows = []
+    for admin_id in admin_ids:
+        label = f"{'🔒 ' if admin_id in root_ids else ''}{admin_id}"
+        if admin_id in root_ids:
+            rows.append([InlineKeyboardButton(text=label, callback_data="admin:admins:noop")])
+        else:
+            rows.append(
+                [
+                    InlineKeyboardButton(text=label, callback_data=f"admin:admins:remove:{admin_id}"),
+                ]
+            )
+    rows.append([InlineKeyboardButton(text="➕ Добавить админа", callback_data="admin:admins:add")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def broadcast_confirm_keyboard(scope: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да", callback_data=f"admin:broadcast:yes:{scope}"),
+                InlineKeyboardButton(text="❌ Нет", callback_data=f"admin:broadcast:no:{scope}"),
+            ]
         ]
     )
 
@@ -85,10 +140,6 @@ def devices_keyboard(
                     callback_data=f"sub:device:del:{device.id}",
                 )
             ]
-        )
-    if can_add:
-        buttons.append(
-            [InlineKeyboardButton(text="➕ Добавить устройство", callback_data="sub:device:add")]
         )
     if can_restore:
         buttons.append(

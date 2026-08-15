@@ -26,6 +26,9 @@ async def main() -> int:
         )
         subscriptions = list(result.scalars().all())
         cred_service = ConfigCredentialService(session, settings)
+        revoked = await cred_service.revoke_inactive_configs()
+        if revoked:
+            print(f"Revoked {revoked} stale credentials for inactive configs")
         for subscription in subscriptions:
             await cred_service.ensure_credentials(subscription)
         await session.commit()

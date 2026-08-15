@@ -17,7 +17,6 @@ from src.core.enums import SubscriptionStatus, VpnConfigType
 from src.core.utils import build_subscription_url
 from src.db.session import get_session
 from src.models import Subscription
-from src.services.vpn_config import get_vpn_architecture_info
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 
@@ -47,6 +46,12 @@ def create_admin_app() -> FastAPI:
             return data.get("username")
         except (BadSignature, SignatureExpired):
             return None
+
+    @app.get("/")
+    async def root(request: Request):
+        if get_current_admin(request):
+            return RedirectResponse("/dashboard", status_code=302)
+        return RedirectResponse("/login", status_code=302)
 
     @app.get("/login", response_class=HTMLResponse)
     async def login_page(request: Request):
@@ -110,21 +115,44 @@ def create_admin_app() -> FastAPI:
     async def users_page(
         request: Request,
         session: AsyncSession = Depends(get_session),
+        q: str | None = None,
+        page: int = 1,
+        filter: str | None = None,
     ):
         admin = get_current_admin(request)
         if not admin:
             return RedirectResponse("/login", status_code=302)
 
+        page = max(1, page)
+        per_page = 50
+        offset = (page - 1) * per_page
+
         service = AdminService(session)
-        users = await service.list_users()
+        total = await service.count_users_filtered(q, filter)
+        users = await service.search_users(
+            query=q,
+            subscription_filter=filter,
+            offset=offset,
+            limit=per_page,
+        )
         user_rows = [
             {"user": user, "subscription": AdminService.get_manageable_subscription(user)}
             for user in users
         ]
+        total_pages = max(1, (total + per_page - 1) // per_page)
         return templates.TemplateResponse(
             request,
             "users.html",
-            {"admin": admin, "user_rows": user_rows},
+            {
+                "admin": admin,
+                "user_rows": user_rows,
+                "q": q or "",
+                "filter": filter or "",
+                "page": page,
+                "total": total,
+                "total_pages": total_pages,
+                "per_page": per_page,
+            },
         )
 
     @app.get("/users/{user_id}", response_class=HTMLResponse)
@@ -178,7 +206,6 @@ def create_admin_app() -> FastAPI:
                 "subscription_url": subscription_url,
                 "stats_enabled": settings.xray_stats_enabled,
                 "success": request.query_params.get("success"),
-                "vpn_arch": get_vpn_architecture_info(),
             },
         )
 
@@ -186,16 +213,13 @@ def create_admin_app() -> FastAPI:
     async def add_device(
         user_id: int,
         request: Request,
-        session: AsyncSession = Depends(get_session),
     ):
         if not get_current_admin(request):
             raise HTTPException(status_code=401)
-        service = AdminService(session)
-        try:
-            await service.add_user_device(user_id, settings)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return RedirectResponse(f"/users/{user_id}", status_code=302)
+        raise HTTPException(
+            status_code=403,
+            detail="Устройства добавляются автоматически при подключении подписки",
+        )
 
     @app.post("/users/{user_id}/devices/{device_id}/delete")
     async def delete_device(
@@ -446,158 +470,16 @@ def create_admin_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Plan not found")
         return RedirectResponse("/plans", status_code=302)
 
-    @app.get("/servers", response_class=HTMLResponse)
-    async def servers_page(
-        request: Request,
-        session: AsyncSession = Depends(get_session),
-    ):
-        admin = get_current_admin(request)
-        if not admin:
-            return RedirectResponse("/login", status_code=302)
-
-        service = AdminService(session)
-        server_rows = await service.list_servers_with_stats()
-        error = request.query_params.get("error")
-        success = request.query_params.get("success")
-        return templates.TemplateResponse(
-            request,
-            "servers.html",
-            {
-                "admin": admin,
-                "server_rows": server_rows,
-                "error": error,
-                "success": success,
-                "vpn_arch": get_vpn_architecture_info(),
-            },
-        )
-
-    @app.get("/servers/{server_id}", response_class=HTMLResponse)
-    async def server_detail_page(
-        server_id: int,
-        request: Request,
-        session: AsyncSession = Depends(get_session),
-    ):
-        admin = get_current_admin(request)
-        if not admin:
-            return RedirectResponse("/login", status_code=302)
-
-        service = AdminService(session)
-        server = await service.get_server_by_id(server_id)
-        if not server:
-            raise HTTPException(status_code=404, detail="Server not found")
-
-        stats = await service.get_server_stats(server)
-        error = request.query_params.get("error")
-        success = request.query_params.get("success")
-        return templates.TemplateResponse(
-            request,
-            "server_detail.html",
-            {
-                "admin": admin,
-                "server": server,
-                "stats": stats,
-                "error": error,
-                "success": success,
-                "capacity_hint": {
-                    "ram_mb": 888,
-                    "cpus": 1,
-                    "recommended_max": 50,
-                    "note": "Panel VPS: PostgreSQL, API, бот, админка, Nginx и Xray exit :10086",
-                },
-            },
-        )
+    @app.get("/servers")
+    @app.get("/servers/{server_id}")
+    async def servers_redirect(server_id: int | None = None):
+        return RedirectResponse("/configs", status_code=302)
 
     @app.post("/servers/create")
-    async def create_server(
-        request: Request,
-        name: str = Form(...),
-        country: str = Form(...),
-        host: str = Form(...),
-        country_flag: str = Form("🌍"),
-        port: int = Form(443),
-        protocol: str = Form("vless"),
-        max_users: int = Form(50),
-        status: str = Form("online"),
-        sort_order: int = Form(0),
-        session: AsyncSession = Depends(get_session),
-    ):
-        if not get_current_admin(request):
-            raise HTTPException(status_code=401)
-        service = AdminService(session)
-        try:
-            await service.create_server(
-                name=name,
-                country=country,
-                host=host,
-                country_flag=country_flag,
-                port=port,
-                protocol=protocol,
-                max_users=max_users,
-                status=status,
-                sort_order=sort_order,
-            )
-        except ValueError as exc:
-            return RedirectResponse(f"/servers?error={quote(str(exc))}", status_code=302)
-        return RedirectResponse("/servers?success=created", status_code=302)
-
     @app.post("/servers/{server_id}/delete")
-    async def delete_server(
-        server_id: int,
-        request: Request,
-        session: AsyncSession = Depends(get_session),
-    ):
-        if not get_current_admin(request):
-            raise HTTPException(status_code=401)
-        service = AdminService(session)
-        try:
-            ok = await service.delete_server(server_id)
-        except ValueError as exc:
-            return RedirectResponse(f"/servers?error={quote(str(exc))}", status_code=302)
-        if not ok:
-            raise HTTPException(status_code=404, detail="Server not found")
-        return RedirectResponse("/servers?success=deleted", status_code=302)
-
     @app.post("/servers/{server_id}/update")
-    async def update_server(
-        server_id: int,
-        request: Request,
-        name: str = Form(...),
-        country: str = Form(...),
-        host: str = Form(...),
-        country_flag: str = Form("🌍"),
-        port: int = Form(443),
-        protocol: str = Form("vless"),
-        max_users: int = Form(...),
-        status: str = Form("online"),
-        sort_order: int = Form(0),
-        is_active: bool = Form(False),
-        session: AsyncSession = Depends(get_session),
-    ):
-        if not get_current_admin(request):
-            raise HTTPException(status_code=401)
-        service = AdminService(session)
-        try:
-            server = await service.update_server(
-                server_id,
-                name=name,
-                country=country,
-                country_flag=country_flag,
-                host=host,
-                port=port,
-                protocol=protocol,
-                max_users=max_users,
-                status=status,
-                sort_order=sort_order,
-                is_active=is_active,
-            )
-        except ValueError as exc:
-            return RedirectResponse(
-                f"/servers/{server_id}?error={quote(str(exc))}",
-                status_code=302,
-            )
-        if not server:
-            raise HTTPException(status_code=404, detail="Server not found")
-        return RedirectResponse(f"/servers/{server_id}?success=1", status_code=302)
+    async def servers_mutations_redirect(server_id: int | None = None):
+        return RedirectResponse("/configs", status_code=302)
 
     @app.get("/configs", response_class=HTMLResponse)
     async def configs_page(
@@ -673,7 +555,6 @@ def create_admin_app() -> FastAPI:
     @app.post("/configs/create")
     async def create_config(
         request: Request,
-        server_id: int = Form(...),
         name: str = Form(...),
         config_type: str = Form(...),
         config_template: str = Form(...),
@@ -685,7 +566,6 @@ def create_admin_app() -> FastAPI:
         service = AdminService(session)
         try:
             config = await service.create_vpn_config(
-                server_id=server_id,
                 name=name,
                 config_type=config_type,
                 config_template=config_template,
@@ -738,6 +618,11 @@ def create_admin_app() -> FastAPI:
             ok = await service.delete_vpn_config(config_id)
         except ValueError as exc:
             return RedirectResponse(f"/configs?error={quote(str(exc))}", status_code=302)
+        except Exception as exc:
+            return RedirectResponse(
+                f"/configs?error={quote(f'Ошибка удаления: {exc}')}",
+                status_code=302,
+            )
         if not ok:
             raise HTTPException(status_code=404, detail="Config not found")
         return RedirectResponse("/configs?success=deleted", status_code=302)
@@ -852,6 +737,8 @@ def create_admin_app() -> FastAPI:
 
         service = AdminService(session)
         referral_bonus = await service.get_referral_bonus_percent(settings)
+        bot_admin_ids = await service.get_bot_admin_ids(settings)
+        root_admin_ids = settings.admin_telegram_ids
         success = request.query_params.get("success")
         error = request.query_params.get("error")
         return templates.TemplateResponse(
@@ -860,10 +747,42 @@ def create_admin_app() -> FastAPI:
             {
                 "admin": admin,
                 "referral_bonus_percent": referral_bonus,
+                "bot_admin_ids": bot_admin_ids,
+                "root_admin_ids": root_admin_ids,
                 "success": success,
                 "error": error,
             },
         )
+
+    @app.post("/settings/bot-admins/add")
+    async def add_bot_admin(
+        request: Request,
+        telegram_id: int = Form(...),
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        try:
+            await service.add_bot_admin_id(settings, telegram_id)
+        except ValueError as exc:
+            return RedirectResponse(f"/settings?error={quote(str(exc))}", status_code=302)
+        return RedirectResponse("/settings?success=admin_added", status_code=302)
+
+    @app.post("/settings/bot-admins/remove")
+    async def remove_bot_admin(
+        request: Request,
+        telegram_id: int = Form(...),
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        try:
+            await service.remove_bot_admin_id(settings, telegram_id)
+        except ValueError as exc:
+            return RedirectResponse(f"/settings?error={quote(str(exc))}", status_code=302)
+        return RedirectResponse("/settings?success=admin_removed", status_code=302)
 
     @app.post("/settings/referral-bonus")
     async def update_referral_bonus(

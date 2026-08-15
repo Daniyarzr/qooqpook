@@ -8,6 +8,7 @@ from src.models import SystemSetting
 
 REFERRAL_BONUS_KEY = "referral_bonus_percent"
 REFERRAL_DISCOUNT_KEY = "referral_discount_percent"  # legacy
+BOT_ADMIN_IDS_KEY = "bot_admin_telegram_ids"
 
 
 class SystemSettingsService:
@@ -59,3 +60,38 @@ class SystemSettingsService:
 
     async def set_referral_discount_percent(self, percent: int) -> int:
         return await self.set_referral_bonus_percent(percent)
+
+    @staticmethod
+    def _parse_id_list(raw: str | None) -> list[int]:
+        if not raw:
+            return []
+        ids: list[int] = []
+        for part in str(raw).split(","):
+            part = part.strip()
+            if part.isdigit():
+                ids.append(int(part))
+        return ids
+
+    async def get_dynamic_bot_admin_ids(self) -> list[int]:
+        raw = await self.get(BOT_ADMIN_IDS_KEY, "")
+        return self._parse_id_list(raw)
+
+    async def get_all_bot_admin_ids(self) -> list[int]:
+        root = set(self.settings.admin_telegram_ids if self.settings else [])
+        dynamic = set(await self.get_dynamic_bot_admin_ids())
+        return sorted(root | dynamic)
+
+    async def add_bot_admin_id(self, telegram_id: int) -> list[int]:
+        dynamic = set(await self.get_dynamic_bot_admin_ids())
+        dynamic.add(int(telegram_id))
+        await self.set(BOT_ADMIN_IDS_KEY, ",".join(str(item) for item in sorted(dynamic)))
+        return await self.get_all_bot_admin_ids()
+
+    async def remove_bot_admin_id(self, telegram_id: int) -> list[int]:
+        root = set(self.settings.admin_telegram_ids if self.settings else [])
+        if int(telegram_id) in root:
+            raise ValueError("Нельзя удалить главного админа из .env")
+        dynamic = set(await self.get_dynamic_bot_admin_ids())
+        dynamic.discard(int(telegram_id))
+        await self.set(BOT_ADMIN_IDS_KEY, ",".join(str(item) for item in sorted(dynamic)))
+        return await self.get_all_bot_admin_ids()

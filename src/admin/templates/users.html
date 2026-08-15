@@ -2,6 +2,28 @@
 {% block title %}Пользователи{% endblock %}
 {% block content %}
 <h2>👥 Пользователи</h2>
+
+<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:20px;">
+    <form method="get" action="/users" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input type="text" name="q" value="{{ q }}" placeholder="ID, Telegram, @username, имя" class="input-sm" style="min-width:240px;">
+        <select name="filter" class="input-sm">
+            <option value="" {% if not filter %}selected{% endif %}>Все</option>
+            <option value="with_sub" {% if filter == 'with_sub' %}selected{% endif %}>С подпиской</option>
+            <option value="no_sub" {% if filter == 'no_sub' %}selected{% endif %}>Без подписки</option>
+        </select>
+        <button type="submit" class="btn-sm btn-success">Найти</button>
+        {% if q or filter %}
+        <a href="/users" class="btn-sm" style="text-decoration:none;display:inline-block;">Сбросить</a>
+        {% endif %}
+    </form>
+    <div style="color:#8b949e;font-size:14px;">
+        Всего: <strong style="color:#f0f6fc;">{{ total }}</strong>
+        {% if total_pages > 1 %}
+        · страница {{ page }} из {{ total_pages }}
+        {% endif %}
+    </div>
+</div>
+
 <table>
     <thead>
         <tr>
@@ -75,7 +97,22 @@
                 </div>
             </td>
         </tr>
+        {% else %}
+        <tr>
+            <td colspan="10" style="text-align:center;color:#8b949e;padding:24px;">Пользователи не найдены</td>
+        </tr>
         {% endfor %}
     </tbody>
 </table>
+
+{% if total_pages > 1 %}
+<div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap;">
+    {% if page > 1 %}
+    <a href="/users?page={{ page - 1 }}&q={{ q }}&filter={{ filter }}" class="btn-sm" style="text-decoration:none;">← Назад</a>
+    {% endif %}
+    {% if page < total_pages %}
+    <a href="/users?page={{ page + 1 }}&q={{ q }}&filter={{ filter }}" class="btn-sm" style="text-decoration:none;">Вперёд →</a>
+    {% endif %}
+</div>
+{% endif %}
 {% endblock %}

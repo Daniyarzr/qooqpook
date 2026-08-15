@@ -45,6 +45,11 @@ def main() -> None:
     env = stdout.read().decode()
     env = re.sub(r"^BOT_TOKEN=.*$", f"BOT_TOKEN={TOKEN}", env, flags=re.M)
     env = re.sub(r"^BOT_USERNAME=.*$", f"BOT_USERNAME={BOT_USERNAME}", env, flags=re.M)
+    return_url = f"https://t.me/{BOT_USERNAME.lstrip('@')}"
+    if re.search(r"^YOOKASSA_RETURN_URL=", env, flags=re.M):
+        env = re.sub(r"^YOOKASSA_RETURN_URL=.*$", f"YOOKASSA_RETURN_URL={return_url}", env, flags=re.M)
+    else:
+        env += f"\nYOOKASSA_RETURN_URL={return_url}\n"
 
     sftp = client.open_sftp()
     with sftp.open("/opt/qooq-vpn/.env", "w") as f:

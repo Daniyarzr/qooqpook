@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # Telegram
     bot_token: str = ""
     bot_username: str = ""
+    support_username: str = "qooqvpnsupport"
     admin_telegram_ids: Annotated[list[int], NoDecode] = []
 
     # Web
@@ -52,6 +53,9 @@ class Settings(BaseSettings):
     xray_config_path: str = "/usr/local/etc/xray/config.json"
     xray_inbound_port: int = 443
     xray_reload_command: str = "systemctl restart xray"
+    panel_xray_config_path: str = "/usr/local/etc/xray/config.json"
+    panel_xray_inbound_port: int = 10086
+    panel_xray_reload_command: str = "systemctl restart xray"
     xray_stats_enabled: bool = False
     xray_stats_api: str = "127.0.0.1:10085"
     xray_bin_path: str = "xray"

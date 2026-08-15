@@ -28,8 +28,17 @@ def build_subscription_url(hub_domain: str, token: str) -> str:
     return f"https://{hub_domain}/sub/{token}"
 
 
-def build_referral_link(bot_username: str, referral_code: str) -> str:
-    return f"https://t.me/{bot_username}?start=ref_{referral_code}"
+def build_referral_link(bot_username: str, telegram_id: int) -> str:
+    username = bot_username.lstrip("@")
+    return f"https://t.me/{username}?start=ref_{telegram_id}"
+
+
+def build_telegram_link(username: str) -> str:
+    return f"https://t.me/{username.lstrip('@')}"
+
+
+def support_telegram_link(support_username: str) -> str:
+    return build_telegram_link(support_username)
 
 
 def format_duration_until(expires_at: datetime) -> str:

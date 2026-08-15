@@ -23,7 +23,7 @@ from src.repositories import (
 )
 from src.services.config_credentials import ConfigCredentialService
 from src.services.devices import DeviceRepository, DeviceService
-from src.services.xray_sync import XrayClient, sync_active_clients
+from src.services.xray_sync import sync_all_active_clients
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,7 @@ class SubscriptionService:
             user_id, plan, promo_code_id
         )
         price = pricing.final_price
+        payment_tx = None
 
         if payment_method == PaymentMethod.BALANCE:
             if user.balance < price:
@@ -94,7 +95,7 @@ class SubscriptionService:
             new_balance = user.balance - price
             await self.users.update_balance(user, new_balance)
             description = f"Оплата подписки: {plan.name}{pricing.description_suffix}"
-            await self.transactions.create(
+            payment_tx = await self.transactions.create(
                 Transaction(
                     user_id=user.id,
                     type=TransactionType.SUBSCRIPTION_PAYMENT,
@@ -109,7 +110,7 @@ class SubscriptionService:
             description = (
                 f"Оплата подписки: {plan.name}{pricing.description_suffix}{order_suffix}"
             )
-            await self.transactions.create(
+            payment_tx = await self.transactions.create(
                 Transaction(
                     user_id=user.id,
                     type=TransactionType.SUBSCRIPTION_PAYMENT,
@@ -157,6 +158,15 @@ class SubscriptionService:
                 user_id,
                 subscription.id,
                 pricing.promo,
+            )
+
+        if payment_tx:
+            from src.services.referral import ReferralService
+
+            await ReferralService(self.session, self.settings).process_payment_bonus(
+                user,
+                price,
+                payment_tx.id,
             )
 
         if sync_xray:
@@ -218,16 +228,7 @@ class SubscriptionService:
 
         cred_service = ConfigCredentialService(self.session, self.settings)
         credentials = await cred_service.get_all_for_active_subscriptions()
-        clients = [
-            XrayClient(
-                user_id=credential.subscription.user_id,
-                credential_id=credential.id,
-                client_uuid=credential.client_uuid,
-            )
-            for credential in credentials
-            if credential.subscription
-        ]
-        return await asyncio.to_thread(sync_active_clients, self.settings, clients)
+        return await asyncio.to_thread(sync_all_active_clients, self.settings, credentials)
 
     async def build_hub_data(self, subscription: Subscription | None, bot_username: str) -> dict:
         bot_link = f"https://t.me/{bot_username}"

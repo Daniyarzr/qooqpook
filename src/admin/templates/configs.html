@@ -4,8 +4,9 @@
 <div class="page-header">
     <h2>📄 JSON конфиги Xray</h2>
     <p class="muted">
-        Шаблоны для выдачи подписок (<code>?format=profile</code>).
-        Обязательные плейсхолдеры: <code>{uuid}</code>, <code>{remarks}</code>.
+        Каждый конфиг — отдельный сервер в подписке Happ.
+        Для своих шаблонов: <code>{uuid}</code>, <code>{remarks}</code>.
+        Готовый чужой JSON можно вставить как есть — имя конфига станет названием сервера.
     </p>
 </div>
 
@@ -22,13 +23,7 @@
     <h3>➕ Добавить конфиг</h3>
     <form method="post" action="/configs/create" class="inline-form" style="flex-direction:column;align-items:stretch;">
         <div class="inline-form">
-            <select name="server_id" class="input-sm" required>
-                <option value="">Сервер</option>
-                {% for server in servers %}
-                <option value="{{ server.id }}">{{ server.country_flag }} {{ server.name }}</option>
-                {% endfor %}
-            </select>
-            <input type="text" name="name" placeholder="Название" class="input-sm" required>
+            <input type="text" name="name" placeholder="Название в Happ" class="input-sm" required style="min-width:180px;">
             <select name="config_type" class="input-sm" required>
                 <option value="xray_json">Xray JSON</option>
                 <option value="vless_link">VLESS link</option>
@@ -68,9 +63,7 @@
             </td>
             <td>
                 {% if config.server %}
-                <a href="/servers/{{ config.server.id }}" class="user-link">
-                    {{ config.server.country_flag }} {{ config.server.name }}
-                </a>
+                {{ config.server.country_flag }} {{ config.server.name }}
                 {% else %}—{% endif %}
             </td>
             <td>

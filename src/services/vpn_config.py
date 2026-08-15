@@ -20,6 +20,8 @@ SUBSCRIPTION_PROFILE_TITLE = "QOOQ VPN 🚀⚡"
 SUBSCRIPTION_BOT_USERNAME = "qooqvpnbot"
 SUBSCRIPTION_REMARK = "QOOQ VPN"
 DEFAULT_REMARK = SUBSCRIPTION_REMARK
+PLACEHOLDER_UUID = "{uuid}"
+PLACEHOLDER_REMARKS = "{remarks}"
 
 RU_DOMAINS = [
     "domain:vk.ru",
@@ -169,6 +171,70 @@ XRAY_CONFIG_TEMPLATE: dict[str, Any] = {
     "stats": {},
 }
 
+LTE_TUNNEL_CONFIG_NAME = "JSON-конфиг"
+FINLAND_CONFIG_NAME = "Финляндия QooQ VPN 🇫🇮"
+
+
+def export_lte_tunnel_json_template() -> str:
+    """Yandex TLS entry — RU bypass routing, per-user UUID."""
+    config = copy.deepcopy(XRAY_CONFIG_TEMPLATE)
+    config["remarks"] = PLACEHOLDER_REMARKS
+    config["outbounds"][0]["settings"]["vnext"][0]["users"][0]["id"] = PLACEHOLDER_UUID
+    return json.dumps(config, ensure_ascii=False, indent=2)
+
+
+def export_finland_direct_json_template() -> str:
+    """Direct VLESS to panel Xray inbound (Finland exit)."""
+    config = {
+        "remarks": PLACEHOLDER_REMARKS,
+        "log": {"loglevel": "warning"},
+        "inbounds": [
+            {
+                "listen": "127.0.0.1",
+                "port": 10808,
+                "protocol": "socks",
+                "settings": {"auth": "noauth", "udp": True},
+                "tag": "socks",
+            }
+        ],
+        "outbounds": [
+            {
+                "protocol": "vless",
+                "settings": {
+                    "vnext": [
+                        {
+                            "address": PANEL_TUNNEL_HOST,
+                            "port": PANEL_TUNNEL_PORT,
+                            "users": [
+                                {
+                                    "encryption": "none",
+                                    "id": PLACEHOLDER_UUID,
+                                    "level": 8,
+                                }
+                            ],
+                        }
+                    ]
+                },
+                "streamSettings": {
+                    "network": "tcp",
+                    "security": "none",
+                    "tcpSettings": {"header": {"type": "none"}},
+                },
+                "tag": "proxy",
+            },
+            {
+                "protocol": "freedom",
+                "settings": {},
+                "tag": "direct",
+            },
+        ],
+        "routing": {
+            "domainStrategy": "AsIs",
+            "rules": [],
+        },
+    }
+    return json.dumps(config, ensure_ascii=False, indent=2)
+
 
 def build_xray_config(
     client_uuid: uuid.UUID,
@@ -212,11 +278,10 @@ def build_subscription_payload(
 
 
 def sanitize_remark(remark: str) -> str:
-    """VPN clients break on non-ASCII and special chars in link fragments."""
+    """Normalize server name for VLESS fragments and Xray remarks (UTF-8 safe)."""
     cleaned = remark.replace("\u2014", "-").replace("\u2013", "-")
-    cleaned = cleaned.encode("ascii", "ignore").decode("ascii")
-    cleaned = re.sub(r"[^\w\s\-_.]", "", cleaned)
-    cleaned = re.sub(r"\s+", "-", cleaned).strip("-_ ")
+    cleaned = cleaned.replace("\n", " ").replace("\r", " ").replace("#", "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned or SUBSCRIPTION_REMARK
 
 
@@ -246,7 +311,7 @@ def build_vless_link(
     remark: str = DEFAULT_REMARK,
 ) -> str:
     """VLESS TLS share link — Yandex tunnel entry."""
-    name = quote(sanitize_remark(remark), safe="")
+    name = encode_vless_fragment(sanitize_remark(remark))
     params = (
         f"encryption=none&security=tls&sni={VPN_SNI}"
         f"&type={VPN_NETWORK}&headerType=none"
@@ -271,13 +336,109 @@ def build_multi_vless_links_text(links: list[tuple[uuid.UUID, str]]) -> str:
     return "".join(build_vless_link(client_uuid, remark) + "\n" for client_uuid, remark in links)
 
 
+def build_multi_share_links_payload(links: list[str]) -> str:
+    """Base64 subscription body — each line is a separate Happ server entry."""
+    body = "".join(line if line.endswith("\n") else f"{line}\n" for line in links if line.strip())
+    return base64.b64encode(body.encode("utf-8")).decode("ascii")
+
+
+def xray_config_to_vless_link(config: dict[str, Any], remark: str) -> str | None:
+    """Build vless:// share link from Xray JSON outbound (foreign or template configs)."""
+    for outbound in config.get("outbounds", []):
+        if outbound.get("protocol") != "vless":
+            continue
+        try:
+            vnext = outbound["settings"]["vnext"][0]
+            user = vnext["users"][0]
+            client_id = user["id"]
+            address = vnext["address"]
+            port = vnext["port"]
+            stream = outbound.get("streamSettings") or {}
+            network = stream.get("network", "tcp")
+            security = stream.get("security") or "none"
+            params: list[str] = ["encryption=none", f"type={network}"]
+
+            if security and security != "none":
+                params.append(f"security={security}")
+
+            tls_settings = stream.get("tlsSettings") or {}
+            reality_settings = stream.get("realitySettings") or {}
+            sni = tls_settings.get("serverName") or reality_settings.get("serverName")
+            if sni:
+                params.append(f"sni={quote(str(sni), safe='')}")
+
+            if security == "reality":
+                pbk = reality_settings.get("publicKey")
+                if pbk:
+                    params.append(f"pbk={quote(str(pbk), safe='')}")
+                sid = reality_settings.get("shortId")
+                if sid:
+                    params.append(f"sid={quote(str(sid), safe='')}")
+                fp = reality_settings.get("fingerprint") or "chrome"
+                params.append(f"fp={fp}")
+
+            if network == "ws":
+                ws = stream.get("wsSettings") or {}
+                path = (ws.get("path") or "/").strip() or "/"
+                host = ws.get("host") or sni or address
+                params.append(f"host={quote(str(host), safe='')}")
+                params.append(f"path={quote(path, safe='')}")
+            elif network == "grpc":
+                grpc = stream.get("grpcSettings") or {}
+                service_name = grpc.get("serviceName") or ""
+                if service_name:
+                    params.append(f"serviceName={quote(str(service_name), safe='')}")
+
+            flow = user.get("flow")
+            if flow:
+                params.append(f"flow={quote(str(flow), safe='')}")
+
+            name = encode_vless_fragment(sanitize_remark(remark))
+            query = "&".join(params)
+            return f"vless://{client_id}@{address}:{port}?{query}#{name}"
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+    return None
+
+
+def build_credential_share_link(
+    client_uuid: uuid.UUID,
+    config_type: str,
+    config_template: str,
+    remark: str,
+) -> str:
+    """One subscription line for Happ — name comes from config remark."""
+    safe_remark = sanitize_remark(remark)
+
+    if config_type == "vless_link":
+        template = config_template.strip()
+        link = template.replace(PLACEHOLDER_UUID, str(client_uuid)).replace("{uuid}", str(client_uuid))
+        if "#" not in link:
+            link = f"{link}#{encode_vless_fragment(safe_remark)}"
+        return link
+
+    from src.services.vpn_config_store import apply_json_template
+
+    raw = config_template.strip()
+    if PLACEHOLDER_UUID in raw or "{uuid}" in raw:
+        applied = apply_json_template(raw, client_uuid, safe_remark)
+    else:
+        applied = json.loads(raw)
+        applied["remarks"] = safe_remark
+
+    vless = xray_config_to_vless_link(applied, safe_remark)
+    if vless:
+        return vless
+    return build_vless_link(client_uuid, safe_remark)
+
+
 EXPIRED_PLACEHOLDER_UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")
 EXPIRED_SERVER_REMARK = "Podpiska-istekla-prodlite-v-Telegram"
 
 
 def build_inactive_vless_link(remark: str = EXPIRED_SERVER_REMARK) -> str:
     """Non-working VLESS entry so Happ shows an expired notice in the server list."""
-    name = quote(sanitize_remark(remark), safe="")
+    name = encode_vless_fragment(sanitize_remark(remark))
     return f"vless://{EXPIRED_PLACEHOLDER_UUID}@127.0.0.1:1?encryption=none&security=none&type=tcp#{name}"
 
 

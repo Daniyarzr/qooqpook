@@ -44,12 +44,24 @@ class ReferralService:
         deposit_amount: Decimal,
         deposit_transaction_id: int,
     ) -> Decimal | None:
+        return await self.process_payment_bonus(
+            referred_user,
+            deposit_amount,
+            deposit_transaction_id,
+        )
+
+    async def process_payment_bonus(
+        self,
+        referred_user: User,
+        payment_amount: Decimal,
+        source_transaction_id: int,
+    ) -> Decimal | None:
         if not referred_user.referred_by_id:
             return None
 
         existing = await self.session.scalar(
             select(ReferralReward.id).where(
-                ReferralReward.source_transaction_id == deposit_transaction_id
+                ReferralReward.source_transaction_id == source_transaction_id
             )
         )
         if existing:
@@ -59,7 +71,7 @@ class ReferralService:
         if percent <= 0:
             return None
 
-        bonus = (deposit_amount * Decimal(percent) / Decimal(100)).quantize(Decimal("0.01"))
+        bonus = (payment_amount * Decimal(percent) / Decimal(100)).quantize(Decimal("0.01"))
         if bonus <= 0:
             return None
 
@@ -74,7 +86,7 @@ class ReferralService:
             user_id=referrer.id,
             amount=bonus,
             description=(
-                f"Реферальный бонус {percent}% с пополнения "
+                f"Реферальный бонус {percent}% с оплаты "
                 f"пользователя {referred_label} (#{referred_user.id})"
             ),
             tx_type=TransactionType.REFERRAL_BONUS,
@@ -86,7 +98,7 @@ class ReferralService:
             bonus_amount=bonus,
             bonus_days=0,
             is_paid=True,
-            source_transaction_id=deposit_transaction_id,
+            source_transaction_id=source_transaction_id,
         )
         self.session.add(reward)
         await self.session.flush()
@@ -97,14 +109,14 @@ class ReferralService:
                 bonus=bonus,
                 balance=bonus_tx.balance_after,
                 percent=percent,
-                deposit_amount=deposit_amount,
+                payment_amount=payment_amount,
             )
 
         logger.info(
-            "Referral bonus %s RUB to user %s from deposit tx %s",
+            "Referral bonus %s RUB to user %s from payment tx %s",
             bonus,
             referrer.id,
-            deposit_transaction_id,
+            source_transaction_id,
         )
         return bonus
 
@@ -114,11 +126,11 @@ class ReferralService:
         bonus: Decimal,
         balance: Decimal,
         percent: int,
-        deposit_amount: Decimal,
+        payment_amount: Decimal,
     ) -> None:
         text = (
             f"🎁 <b>Реферальный бонус!</b>\n\n"
-            f"Ваш друг пополнил баланс на <b>{deposit_amount} ₽</b>\n"
+            f"Ваш друг оплатил <b>{payment_amount} ₽</b>\n"
             f"Вам начислено <b>{percent}%</b>: <b>+{bonus} ₽</b>\n\n"
             f"💳 Баланс: <b>{balance} ₽</b>"
         )

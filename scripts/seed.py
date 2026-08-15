@@ -10,9 +10,7 @@ from sqlalchemy import select
 from src.admin.services import AdminService, hash_password
 from src.core.config import get_settings
 from src.db.session import async_session_factory
-from src.core.enums import VpnConfigType
-from src.models import AdminUser, SubscriptionPlan, VpnConfig, VpnServer
-from src.services.vpn_config_store import VpnConfigStore, export_default_json_template
+from src.models import AdminUser, SubscriptionPlan, VpnServer
 from src.services.vpn_servers_sync import sync_vpn_servers
 
 
@@ -75,15 +73,6 @@ async def seed():
             )
             session.add(server)
             await session.flush()
-
-            json_config = VpnConfig(
-                server_id=server.id,
-                name="Xray JSON Profile",
-                config_type=VpnConfigType.XRAY_JSON,
-                config_template=export_default_json_template(),
-                is_default=True,
-            )
-            session.add(json_config)
             print("✅ VPN entry server created")
 
         sync_messages = await sync_vpn_servers(session)

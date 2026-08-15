@@ -1,4 +1,4 @@
-"""Sync active client UUIDs to the Xray TLS inbound on the Yandex tunnel node."""
+"""Sync active client UUIDs to Xray inbounds (Yandex TLS entry + panel direct)."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.core.config import Settings
+from src.services.vpn_config import FINLAND_CONFIG_NAME, LTE_TUNNEL_CONFIG_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,92 @@ class XraySyncService:
         if not self.settings.xray_sync_enabled:
             logger.debug("Xray sync disabled")
             return False
+        return self._sync_remote(
+            active_clients,
+            ssh_host=self.settings.xray_ssh_host,
+            ssh_port=self.settings.xray_ssh_port,
+            ssh_user=self.settings.xray_ssh_user,
+            config_path=self.settings.xray_config_path,
+            inbound_port=self.settings.xray_inbound_port,
+            reload_command=self.settings.xray_reload_command,
+            label="Yandex",
+        )
 
+    def sync_panel_clients(self, active_clients: list[XrayClient]) -> bool:
+        if not self.settings.xray_sync_enabled:
+            logger.debug("Panel Xray sync disabled")
+            return False
+        return self._sync_local(
+            active_clients,
+            config_path=self.settings.panel_xray_config_path,
+            inbound_port=self.settings.panel_xray_inbound_port,
+            reload_command=self.settings.panel_xray_reload_command,
+            label="Panel",
+        )
+
+    def _sync_local(
+        self,
+        active_clients: list[XrayClient],
+        *,
+        config_path: str,
+        inbound_port: int,
+        reload_command: str,
+        label: str,
+    ) -> bool:
+        path = Path(config_path)
+        if not path.exists():
+            logger.error("%s Xray config not found: %s", label, path)
+            return False
+        try:
+            current = json.loads(path.read_text(encoding="utf-8"))
+            before = json.dumps(current, sort_keys=True)
+            updated = self._merge_clients(
+                copy.deepcopy(current),
+                active_clients,
+                inbound_port=inbound_port,
+            )
+            after = json.dumps(updated, sort_keys=True)
+            if before == after:
+                logger.info("%s Xray config unchanged (%d active clients)", label, len(active_clients))
+                return True
+
+            tmp_path = path.with_suffix(f".{uuid.uuid4().hex}.json")
+            tmp_path.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp_path.replace(path)
+            path.chmod(0o644)
+            self._reload_local(reload_command)
+            logger.info("%s Xray synced: %d active client UUIDs", label, len(active_clients))
+            return True
+        except Exception:
+            logger.exception("%s Xray sync failed", label)
+            return False
+
+    def _reload_local(self, reload_command: str) -> None:
+        import subprocess
+
+        result = subprocess.run(
+            reload_command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr or result.stdout or "Xray reload failed")
+
+    def _sync_remote(
+        self,
+        active_clients: list[XrayClient],
+        *,
+        ssh_host: str,
+        ssh_port: int,
+        ssh_user: str,
+        config_path: str,
+        inbound_port: int,
+        reload_command: str,
+        label: str,
+    ) -> bool:
         try:
             import paramiko
         except ImportError:
@@ -48,9 +134,9 @@ class XraySyncService:
 
         key_path = Path(self.settings.xray_ssh_key_path)
         connect_kwargs: dict = {
-            "hostname": self.settings.xray_ssh_host,
-            "port": self.settings.xray_ssh_port,
-            "username": self.settings.xray_ssh_user,
+            "hostname": ssh_host,
+            "port": ssh_port,
+            "username": ssh_user,
             "timeout": 20,
             "look_for_keys": False,
             "allow_agent": False,
@@ -63,20 +149,24 @@ class XraySyncService:
 
         try:
             client.connect(**connect_kwargs)
-            current = self._read_remote_config(client)
+            current = self._read_remote_config(client, config_path)
             before = json.dumps(current, sort_keys=True)
-            updated = self._merge_clients(copy.deepcopy(current), active_clients)
+            updated = self._merge_clients(
+                copy.deepcopy(current),
+                active_clients,
+                inbound_port=inbound_port,
+            )
             after = json.dumps(updated, sort_keys=True)
             if before == after:
-                logger.info("Xray config unchanged (%d active clients)", len(active_clients))
+                logger.info("%s Xray config unchanged (%d active clients)", label, len(active_clients))
                 return True
 
-            self._write_remote_config(client, updated)
-            self._reload_xray(client)
-            logger.info("Xray synced: %d active client UUIDs", len(active_clients))
+            self._write_remote_config(client, updated, config_path)
+            self._reload_xray(client, reload_command)
+            logger.info("%s Xray synced: %d active client UUIDs", label, len(active_clients))
             return True
         except Exception:
-            logger.exception("Xray sync failed")
+            logger.exception("%s Xray sync failed", label)
             return False
         finally:
             client.close()
@@ -86,16 +176,16 @@ class XraySyncService:
             return f"sudo -n {cmd}"
         return cmd
 
-    def _read_remote_config(self, client) -> dict:
-        path = shlex.quote(self.settings.xray_config_path)
+    def _read_remote_config(self, client, config_path: str) -> dict:
+        path = shlex.quote(config_path)
         _, stdout, stderr = client.exec_command(self._sudo(f"cat {path}"))
         err = stderr.read().decode()
         if stdout.channel.recv_exit_status() != 0:
             raise RuntimeError(f"Failed to read {path}: {err}")
         return json.loads(stdout.read().decode())
 
-    def _write_remote_config(self, client, config: dict) -> None:
-        path = self.settings.xray_config_path
+    def _write_remote_config(self, client, config: dict, config_path: str) -> None:
+        path = config_path
         payload = json.dumps(config, ensure_ascii=False, indent=2)
         tmp_path = f"/tmp/xray-config-{uuid.uuid4().hex}.json"
         quoted_tmp = shlex.quote(tmp_path)
@@ -113,18 +203,22 @@ class XraySyncService:
         if stdout.channel.recv_exit_status() != 0:
             raise RuntimeError(stderr.read().decode() or "Failed to install Xray config")
 
-    def _reload_xray(self, client) -> None:
-        cmd = self._sudo(self.settings.xray_reload_command)
+    def _reload_xray(self, client, reload_command: str) -> None:
+        cmd = self._sudo(reload_command)
         _, stdout, stderr = client.exec_command(cmd)
         if stdout.channel.recv_exit_status() != 0:
             raise RuntimeError(stderr.read().decode() or "Xray reload failed")
 
-    def _merge_clients(self, config: dict, active_clients: list[XrayClient]) -> dict:
-        inbound = self._find_inbound(config)
+    def _merge_clients(
+        self,
+        config: dict,
+        active_clients: list[XrayClient],
+        *,
+        inbound_port: int,
+    ) -> dict:
+        inbound = self._find_inbound(config, inbound_port)
         if inbound is None:
-            raise RuntimeError(
-                f"VLESS inbound on port {self.settings.xray_inbound_port} not found"
-            )
+            raise RuntimeError(f"VLESS inbound on port {inbound_port} not found")
 
         settings = inbound.setdefault("settings", {})
         existing = settings.get("clients", [])
@@ -163,14 +257,45 @@ class XraySyncService:
         system["statsInboundUplink"] = True
         system["statsInboundDownlink"] = True
 
-    def _find_inbound(self, config: dict) -> dict | None:
+    def _find_inbound(self, config: dict, inbound_port: int) -> dict | None:
         for inbound in config.get("inbounds", []):
             if inbound.get("protocol") != "vless":
                 continue
-            if inbound.get("port") == self.settings.xray_inbound_port:
+            if inbound.get("port") == inbound_port:
                 return inbound
         return None
 
 
+def _split_clients_by_config(
+    credentials,
+) -> tuple[list[XrayClient], list[XrayClient]]:
+    tunnel_clients: list[XrayClient] = []
+    panel_clients: list[XrayClient] = []
+    for credential in credentials:
+        if not credential.subscription:
+            continue
+        client = XrayClient(
+            user_id=credential.subscription.user_id,
+            credential_id=credential.id,
+            client_uuid=credential.client_uuid,
+        )
+        config_name = credential.vpn_config.name if credential.vpn_config else ""
+        if config_name == FINLAND_CONFIG_NAME:
+            panel_clients.append(client)
+        elif config_name == LTE_TUNNEL_CONFIG_NAME or not config_name:
+            tunnel_clients.append(client)
+        else:
+            tunnel_clients.append(client)
+    return tunnel_clients, panel_clients
+
+
 def sync_active_clients(settings: Settings, active_clients: list[XrayClient]) -> bool:
     return XraySyncService(settings).sync_clients(active_clients)
+
+
+def sync_all_active_clients(settings: Settings, credentials) -> bool:
+    tunnel_clients, panel_clients = _split_clients_by_config(credentials)
+    service = XraySyncService(settings)
+    yandex_ok = service.sync_clients(tunnel_clients)
+    panel_ok = service.sync_panel_clients(panel_clients)
+    return yandex_ok and panel_ok

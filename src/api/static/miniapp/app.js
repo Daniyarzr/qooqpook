@@ -262,7 +262,7 @@
         }
 
         const sub = state.subscription;
-        const canAdd = state.devices.length < sub.max_devices && !sub.suspended_device_limit;
+        const canAdd = false; // устройства добавляются автоматически при подключении
 
         let html = `<div class="screen-inner"><div class="card">
             <div class="card-title"><span class="hint-icon">📱</span> Устройства (${state.devices.length} / ${sub.max_devices})</div>`;
@@ -272,7 +272,7 @@
         }
 
         if (!state.devices.length) {
-            html += `<p style="color:var(--text-muted);font-size:14px">Нет устройств</p>`;
+            html += `<p style="color:var(--text-muted);font-size:14px">Устройство появится автоматически после добавления подписки в VPN-клиент</p>`;
         } else {
             for (const d of state.devices) {
                 html += `<div class="device-card">
@@ -283,10 +283,6 @@
                     <button class="btn btn-danger btn-sm" data-delete-device="${d.id}" type="button">🗑</button>
                 </div>`;
             }
-        }
-
-        if (canAdd) {
-            html += `<div class="btn-group"><button class="btn btn-primary" id="add-device" type="button">➕ Добавить устройство</button></div>`;
         }
 
         if (sub.can_restore) {
@@ -390,6 +386,11 @@
                     <li>Скопируйте ссылку подписки</li>
                     <li>Добавьте в VPN-клиент (Happ, v2rayNG, Hiddify)</li>
                 </ol>
+                <p style="margin-top:12px">
+                    <a href="https://t.me/${esc(state.settings.support_username)}" target="_blank" rel="noopener">
+                        💬 Поддержка @${esc(state.settings.support_username)}
+                    </a>
+                </p>
             </div>
         </div></div>`;
 
@@ -696,16 +697,6 @@
             } catch (e) {
                 showToast(e.message);
                 btn.disabled = false;
-            }
-        });
-
-        $("#add-device")?.addEventListener("click", async () => {
-            try {
-                state = await api("/miniapp/devices", { method: "POST" });
-                showToast("✅ Устройство добавлено");
-                render();
-            } catch (e) {
-                showToast(e.message);
             }
         });
 

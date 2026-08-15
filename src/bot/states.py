@@ -7,3 +7,12 @@ class PromoStates(StatesGroup):
 
 class DepositStates(StatesGroup):
     waiting_amount = State()
+
+
+class AdminBroadcastStates(StatesGroup):
+    waiting_content = State()
+    waiting_target_id = State()
+
+
+class AdminManageStates(StatesGroup):
+    waiting_add_id = State()

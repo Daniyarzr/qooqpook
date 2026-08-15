@@ -23,9 +23,7 @@
             <dt>Сервер</dt>
             <dd>
                 {% if config.server %}
-                <a href="/servers/{{ config.server.id }}" class="user-link">
-                    {{ config.server.country_flag }} {{ config.server.name }}
-                </a>
+                {{ config.server.country_flag }} {{ config.server.name }}
                 {% else %}—{% endif %}
             </dd>
             <dt>Тип</dt><dd>{{ config.config_type.value }}</dd>
@@ -39,7 +37,8 @@
     <section class="card card-wide">
         <h3>✏️ Редактировать шаблон</h3>
         <p class="muted" style="margin-bottom:12px;">
-            Для Xray JSON обязательны плейсхолдеры <code>{uuid}</code> и <code>{remarks}</code>.
+            Для шаблонов с подстановкой UUID: <code>{uuid}</code> и <code>{remarks}</code>.
+            Готовый чужой JSON — без плейсхолдеров; название сервера в Happ = имя конфига.
         </p>
         <form method="post" action="/configs/{{ config.id }}/update" class="inline-form" style="flex-direction:column;align-items:stretch;">
             <input type="text" name="name" value="{{ config.name }}" class="input-sm" required>

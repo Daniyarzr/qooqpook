@@ -30,10 +30,16 @@ from src.services.payment import PaymentService
 router = Router(name="payment")
 
 
+def _deposit_unavailable(settings: Settings) -> str:
+    return DEPOSIT_NOT_CONFIGURED.format(
+        support_username=settings.support_username.lstrip("@")
+    )
+
+
 @router.callback_query(F.data == "balance:topup")
 async def start_topup(callback: CallbackQuery, session: AsyncSession, settings: Settings):
     if not settings.yookassa_enabled:
-        await callback.answer(DEPOSIT_NOT_CONFIGURED, show_alert=True)
+        await callback.answer(_deposit_unavailable(settings), show_alert=True)
         return
 
     repo = UserRepository(session)
@@ -55,7 +61,7 @@ async def ask_custom_amount(
     callback: CallbackQuery, state: FSMContext, settings: Settings
 ):
     if not settings.yookassa_enabled:
-        await callback.answer(DEPOSIT_NOT_CONFIGURED, show_alert=True)
+        await callback.answer(_deposit_unavailable(settings), show_alert=True)
         return
 
     await state.set_state(DepositStates.waiting_amount)
@@ -117,7 +123,7 @@ async def create_deposit(callback: CallbackQuery, session: AsyncSession, setting
         return
 
     if not settings.yookassa_enabled:
-        await callback.answer(DEPOSIT_NOT_CONFIGURED, show_alert=True)
+        await callback.answer(_deposit_unavailable(settings), show_alert=True)
         return
 
     repo = UserRepository(session)

@@ -123,7 +123,7 @@ async def build_bootstrap(
         plans=[SubscriptionPlanRead.model_validate(plan) for plan in plans],
         transactions=[TransactionRead.model_validate(tx) for tx in transactions],
         referral=MiniAppReferralRead(
-            referral_link=build_referral_link(settings.bot_username, user.referral_code),
+            referral_link=build_referral_link(settings.bot_username, user.telegram_id),
             referral_code=user.referral_code,
             bonus_percent=bonus_percent,
             referrals_count=referrals_count,
@@ -137,6 +137,7 @@ async def build_bootstrap(
             deposit_max_amount=settings.deposit_max_amount,
             yookassa_enabled=settings.yookassa_enabled,
             bot_username=settings.bot_username,
+            support_username=settings.support_username.lstrip("@"),
             referral_welcome=referral_welcome,
         ),
     )
@@ -363,23 +364,11 @@ async def check_deposit(
 @router.post("/devices", response_model=MiniAppBootstrapResponse)
 async def add_device(
     auth: tuple[User, bool] = Depends(get_or_create_miniapp_user),
-    session: AsyncSession = Depends(get_session),
-    settings: Settings = Depends(get_settings),
 ):
-    user, _ = auth
-    sub_service = SubscriptionService(session, settings)
-    subscription = await sub_service.subscriptions.get_current_by_user(user.id)
-    if not subscription or subscription.status == SubscriptionStatus.SUSPENDED:
-        raise HTTPException(status_code=400, detail="Subscription unavailable")
-
-    device_service = DeviceService(session, settings)
-    try:
-        await device_service.add_device(subscription)
-        await sub_service.sync_xray_clients()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return await build_bootstrap(session, settings, user)
+    raise HTTPException(
+        status_code=403,
+        detail="Устройства добавляются автоматически при подключении подписки в VPN-клиенте",
+    )
 
 
 @router.delete("/devices/{device_id}", response_model=MiniAppBootstrapResponse)

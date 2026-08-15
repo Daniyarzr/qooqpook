@@ -45,9 +45,12 @@ cd /opt/qooq-vpn
 tar -xzf /tmp/qooq-vpn.tar.gz
 .venv/bin/pip install -e . -q
 .venv/bin/alembic upgrade head
-.venv/bin/python scripts/seed.py
+.venv/bin/python scripts/seed.py || echo "WARN: seed failed, continuing deploy"
 systemctl daemon-reload
 systemctl restart qooq-api qooq-admin qooq-bot 2>/dev/null || systemctl restart qooq-api qooq-admin
+sleep 15
+curl -sf http://127.0.0.1:8000/health >/dev/null || (echo "WARN: API not ready yet" && sleep 5 && curl -sf http://127.0.0.1:8000/health >/dev/null || echo "WARN: API health still failing")
+curl -sf http://127.0.0.1:8001/login >/dev/null || echo "WARN: Admin health failing"
 # Xray UUID sync every 5 minutes (when SSH key configured)
 grep -q sync_xray_users.py /etc/cron.d/qooq-vpn 2>/dev/null || cat > /etc/cron.d/qooq-vpn <<'CRON'
 */5 * * * * root cd /opt/qooq-vpn && .venv/bin/python scripts/sync_xray_users.py >> /var/log/qooq-xray-sync.log 2>&1

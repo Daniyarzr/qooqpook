@@ -23,7 +23,7 @@ DEVICE_LIMIT_MESSAGE = """
 2️⃣ Удалите лишние устройства
 3️⃣ Нажмите «✅ Восстановить подписку»
 
-Если считаете, что это ошибка — напишите в поддержку.
+Если считаете, что это ошибка — напишите @{support_username}.
 """
 
 
@@ -130,6 +130,7 @@ class DeviceLimitService:
 
         text = DEVICE_LIMIT_MESSAGE.format(
             max_devices=self.settings.max_devices_per_subscription,
+            support_username=self.settings.support_username.lstrip("@"),
         )
         sent = await send_telegram_message(self.settings, user.telegram_id, text)
         if sent:

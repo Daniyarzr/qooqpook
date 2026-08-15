@@ -122,7 +122,9 @@ class VpnConfig(Base):
         "Subscription", back_populates="config"
     )
     credentials: Mapped[list["SubscriptionConfigCredential"]] = relationship(
-        "SubscriptionConfigCredential", back_populates="vpn_config"
+        "SubscriptionConfigCredential",
+        back_populates="vpn_config",
+        passive_deletes=True,
     )
 
 

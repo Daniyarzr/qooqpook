@@ -1,6 +1,5 @@
 """Load and apply VPN JSON config templates from the database."""
 
-import copy
 import json
 import uuid
 from typing import Any
@@ -11,7 +10,10 @@ from sqlalchemy.orm import selectinload
 
 from src.core.enums import VpnConfigType
 from src.models import VpnConfig
-from src.services.vpn_config import XRAY_CONFIG_TEMPLATE, sanitize_remark
+from src.services.vpn_config import (
+    export_lte_tunnel_json_template,
+    sanitize_remark,
+)
 
 PLACEHOLDER_UUID = "{uuid}"
 PLACEHOLDER_REMARKS = "{remarks}"
@@ -19,21 +21,21 @@ PLACEHOLDER_REMARKS = "{remarks}"
 
 def export_default_json_template() -> str:
     """Built-in Xray JSON with placeholders for admin seeding."""
-    config = copy.deepcopy(XRAY_CONFIG_TEMPLATE)
-    config["remarks"] = PLACEHOLDER_REMARKS
-    config["outbounds"][0]["settings"]["vnext"][0]["users"][0]["id"] = PLACEHOLDER_UUID
-    return json.dumps(config, ensure_ascii=False, indent=2)
+    return export_lte_tunnel_json_template()
 
 
-def validate_json_template(raw: str) -> dict[str, Any]:
+def validate_json_template(raw: str, *, require_uuid: bool = True) -> dict[str, Any]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Невалидный JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError("JSON-конфиг должен быть объектом")
-    if PLACEHOLDER_UUID not in raw:
-        raise ValueError(f"Шаблон должен содержать плейсхолдер {PLACEHOLDER_UUID}")
+    if require_uuid and PLACEHOLDER_UUID not in raw and "{uuid}" not in raw:
+        raise ValueError(
+            f"Шаблон должен содержать плейсхолдер {PLACEHOLDER_UUID} "
+            "(или отключите проверку для готового чужого конфига)"
+        )
     return data
 
 
@@ -136,7 +138,7 @@ class VpnConfigStore:
         is_default: bool = False,
     ) -> VpnConfig:
         if config_type == VpnConfigType.XRAY_JSON:
-            validate_json_template(config_template)
+            validate_json_template(config_template, require_uuid=False)
 
         if is_default:
             await self._clear_default(config_type)
@@ -170,7 +172,7 @@ class VpnConfigStore:
             config.name = name.strip()
         if config_template is not None:
             if config.config_type == VpnConfigType.XRAY_JSON:
-                validate_json_template(config_template)
+                validate_json_template(config_template, require_uuid=False)
             config.config_template = config_template.strip()
         if is_default is not None:
             if is_default:
@@ -183,19 +185,24 @@ class VpnConfigStore:
         return config
 
     async def delete_config(self, config_id: int) -> bool:
-        from src.models import Subscription
+        from sqlalchemy import delete, update
+
+        from src.models import Subscription, SubscriptionConfigCredential
 
         config = await self.get_by_id(config_id)
         if not config:
             return False
 
-        linked = await self.session.scalar(
-            select(Subscription.id)
+        await self.session.execute(
+            update(Subscription)
             .where(Subscription.config_id == config_id)
-            .limit(1)
+            .values(config_id=None)
         )
-        if linked:
-            raise ValueError("Нельзя удалить: конфиг привязан к подпискам")
+        await self.session.execute(
+            delete(SubscriptionConfigCredential).where(
+                SubscriptionConfigCredential.vpn_config_id == config_id
+            )
+        )
 
         await self.session.delete(config)
         await self.session.flush()
@@ -225,7 +232,7 @@ class VpnConfigStore:
                 VpnConfig.config_type == VpnConfigType.XRAY_JSON,
             )
         )
-        if result.scalar_one_or_none():
+        if result.scalars().first():
             return None
 
         return await self.create_config(

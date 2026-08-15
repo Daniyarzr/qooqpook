@@ -27,6 +27,17 @@ class UserRepository:
         )
         return result.scalar_one_or_none()
 
+    async def resolve_referrer(self, ref_token: str) -> User | None:
+        token = ref_token.removeprefix("ref_").strip()
+        if not token:
+            return None
+        referrer = await self.get_by_referral_code(token)
+        if referrer:
+            return referrer
+        if token.isdigit():
+            return await self.get_by_telegram_id(int(token))
+        return None
+
     async def create(
         self,
         telegram_id: int,
@@ -51,6 +62,10 @@ class UserRepository:
         user.balance = new_balance
         await self.session.flush()
         return user
+
+    async def list_all_telegram_ids(self) -> list[int]:
+        result = await self.session.execute(select(User.telegram_id).order_by(User.telegram_id))
+        return [row[0] for row in result.all()]
 
 
 class SubscriptionRepository:

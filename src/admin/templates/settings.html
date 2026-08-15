@@ -3,21 +3,25 @@
 {% block content %}
 <h2>⚙️ Настройки сервиса</h2>
 
-{% if success %}
+{% if success == 'admin_added' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Админ бота добавлен</p>
+{% elif success == 'admin_removed' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Админ бота удалён</p>
+{% elif success %}
 <p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Настройки сохранены</p>
 {% endif %}
 {% if error %}
 <p class="muted" style="color:#e74c3c;margin-bottom:16px;">⚠️ {{ error }}</p>
 {% endif %}
 
-<section class="card" style="max-width:560px;">
+<section class="card" style="max-width:560px;margin-bottom:24px;">
     <h3>🎁 Реферальная программа</h3>
     <p class="muted" style="margin-bottom:16px;">
-        Пригласивший получает процент на баланс с каждого пополнения приглашённого пользователя.
-        Бонус начисляется повторно при каждом новом пополнении.
+        Пригласивший получает процент на баланс с каждой оплаты приглашённого (пополнение или подписка).
+        Ссылка: <code>https://t.me/bot?start=ref_{telegram_id}</code>
     </p>
     <form method="post" action="/settings/referral-bonus" class="inline-form">
-        <label for="referral_bonus_percent">Бонус с пополнения реферала, %</label>
+        <label for="referral_bonus_percent">Бонус с оплаты реферала, %</label>
         <input
             type="number"
             id="referral_bonus_percent"
@@ -31,8 +35,53 @@
         <button type="submit" class="btn-sm btn-success">Сохранить</button>
     </form>
     <p class="muted" style="margin-top:12px;">
-        Пример: друг пополнил на 1000 ₽ → реферер получает {{ referral_bonus_percent }}% =
+        Пример: друг оплатил 1000 ₽ → реферер получает {{ referral_bonus_percent }}% =
         {{ (referral_bonus_percent * 10) }} ₽ на баланс.
     </p>
+</section>
+
+<section class="card" style="max-width:560px;">
+    <h3>👥 Админы Telegram-бота</h3>
+    <p class="muted" style="margin-bottom:16px;">
+        Доступ к рассылке и админ-панели в боте. Главные админы из .env (🔒) удалить нельзя.
+    </p>
+
+    {% if bot_admin_ids %}
+    <table style="margin-bottom:16px;">
+        <thead>
+            <tr><th>Telegram ID</th><th>Тип</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for admin_id in bot_admin_ids %}
+            <tr>
+                <td><code>{{ admin_id }}</code></td>
+                <td>
+                    {% if admin_id in root_admin_ids %}
+                    <span class="badge badge-green">Главный (.env)</span>
+                    {% else %}
+                    <span class="badge">Добавлен</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if admin_id not in root_admin_ids %}
+                    <form method="post" action="/settings/bot-admins/remove" style="display:inline">
+                        <input type="hidden" name="telegram_id" value="{{ admin_id }}">
+                        <button type="submit" class="btn-sm btn-danger">Удалить</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted" style="margin-bottom:16px;">Админов нет</p>
+    {% endif %}
+
+    <form method="post" action="/settings/bot-admins/add" class="inline-form">
+        <label for="telegram_id">Добавить по Telegram ID</label>
+        <input type="number" id="telegram_id" name="telegram_id" class="input-sm" placeholder="123456789" required min="1">
+        <button type="submit" class="btn-sm btn-success">Добавить</button>
+    </form>
 </section>
 {% endblock %}

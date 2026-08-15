@@ -7,13 +7,16 @@ from sqlalchemy import select
 from src.core.enums import ServerStatus
 from src.models import VpnConfig, VpnServer
 from src.services.vpn_config import (
+    FINLAND_CONFIG_NAME,
+    LTE_TUNNEL_CONFIG_NAME,
     PANEL_TUNNEL_HOST,
     PANEL_TUNNEL_PORT,
     VPN_HOST,
     VPN_PORT,
     VPN_SNI,
+    export_finland_direct_json_template,
+    export_lte_tunnel_json_template,
 )
-from src.services.vpn_config_store import VpnConfigStore, export_default_json_template
 
 
 ENTRY_SERVER = {
@@ -75,41 +78,101 @@ async def _upsert_server(session, spec: dict) -> VpnServer:
     return server
 
 
+async def _upsert_happ_config(
+    session,
+    *,
+    server_id: int,
+    name: str,
+    template: str,
+    is_default: bool,
+    aliases: tuple[str, ...] = (),
+) -> None:
+    from src.core.enums import VpnConfigType
+
+    result = await session.execute(
+        select(VpnConfig)
+        .where(
+            VpnConfig.server_id == server_id,
+            VpnConfig.name.in_((name, *aliases)),
+        )
+        .order_by(VpnConfig.id.desc())
+    )
+    configs = list(result.scalars().all())
+    config = next((item for item in configs if item.name == name), None)
+    if config is None and configs:
+        config = configs[0]
+    if config:
+        config.name = name
+        config.config_template = template
+        config.config_type = VpnConfigType.XRAY_JSON
+        config.is_active = True
+        config.is_default = is_default
+        return
+
+    session.add(
+        VpnConfig(
+            server_id=server_id,
+            name=name,
+            config_type=VpnConfigType.XRAY_JSON,
+            config_template=template,
+            is_default=is_default,
+            is_active=True,
+        )
+    )
+
+
 async def sync_vpn_servers(session) -> list[str]:
     """Ensure admin server list matches real tunnel architecture."""
     messages: list[str] = []
-    store = VpnConfigStore(session)
-    default_template = export_default_json_template()
+    lte_template = export_lte_tunnel_json_template()
+    finland_template = export_finland_direct_json_template()
 
     for spec in (ENTRY_SERVER, TUNNEL_SERVER):
         server = await _upsert_server(session, spec)
         messages.append(f"✅ Server synced: {server.name} ({server.host}:{server.port})")
 
-        result = await session.execute(
-            select(VpnConfig).where(VpnConfig.server_id == server.id)
-        )
-        configs = list(result.scalars().all())
-        if server.host == VPN_HOST:
-            from src.core.enums import VpnConfigType
+    entry = await session.execute(select(VpnServer).where(VpnServer.host == VPN_HOST))
+    entry_server = entry.scalar_one_or_none()
+    panel = await session.execute(select(VpnServer).where(VpnServer.host == PANEL_TUNNEL_HOST))
+    panel_server = panel.scalar_one_or_none()
 
-            if not configs:
-                session.add(
-                    VpnConfig(
-                        server_id=server.id,
-                        name="Xray JSON Profile",
-                        config_type=VpnConfigType.XRAY_JSON,
-                        config_template=default_template,
-                        is_default=True,
-                        is_active=True,
-                    )
-                )
-                messages.append(f"   ↳ JSON config created for {server.name}")
-            else:
-                for config in configs:
-                    if config.config_type == VpnConfigType.XRAY_JSON:
-                        config.config_template = default_template
-                        config.is_default = True
-                        messages.append(f"   ↳ JSON template updated for {server.name}")
+    if entry_server:
+        await _upsert_happ_config(
+            session,
+            server_id=entry_server.id,
+            name=LTE_TUNNEL_CONFIG_NAME,
+            template=lte_template,
+            is_default=True,
+            aliases=("Туннель LTE Обход 🇷🇺", "Xray JSON Profile"),
+        )
+        messages.append(f"   ↳ Happ config: {LTE_TUNNEL_CONFIG_NAME}")
+
+    if panel_server:
+        await _upsert_happ_config(
+            session,
+            server_id=panel_server.id,
+            name=FINLAND_CONFIG_NAME,
+            template=finland_template,
+            is_default=False,
+            aliases=("Финляндия 🇫🇮", "Финляндия Qooq Vpn"),
+        )
+        messages.append(f"   ↳ Happ config: {FINLAND_CONFIG_NAME}")
+
+    # Deactivate obsolete demo configs and legacy auto-seeded profiles
+    result = await session.execute(select(VpnConfig))
+    allowed_names = {LTE_TUNNEL_CONFIG_NAME, FINLAND_CONFIG_NAME}
+    for legacy_config in result.scalars().all():
+        if legacy_config.name not in allowed_names:
+            legacy_config.is_active = False
+            legacy_config.is_default = False
+            messages.append(f"   ↳ Deactivated legacy config: {legacy_config.name!r}")
+
+    from src.services.config_credentials import ConfigCredentialService
+    from src.core.config import get_settings
+
+    revoked = await ConfigCredentialService(session, get_settings()).revoke_inactive_configs()
+    if revoked:
+        messages.append(f"   ↳ Revoked {revoked} stale credentials")
 
     # Deactivate obsolete demo servers pointing at wrong hosts
     result = await session.execute(select(VpnServer))
@@ -123,8 +186,4 @@ async def sync_vpn_servers(session) -> list[str]:
                 legacy.name = f"[legacy] {legacy.name}"
             messages.append(f"⚠️ Deactivated legacy server: {legacy.host}")
 
-    entry = await session.execute(select(VpnServer).where(VpnServer.host == VPN_HOST))
-    entry_server = entry.scalar_one_or_none()
-    if entry_server:
-        await store.seed_default_json_for_server(entry_server.id)
     return messages

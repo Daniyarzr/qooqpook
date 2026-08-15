@@ -46,9 +46,9 @@ from src.services.vpn_config import (
 
     build_inactive_vless_link,
 
-    build_multi_vless_links_text,
+    build_multi_share_links_payload,
 
-    build_multi_vless_subscription_payload,
+    build_credential_share_link,
 
     build_subscription_payload,
 
@@ -114,7 +114,15 @@ def _bot_link(settings: Settings) -> str:
 
     username = settings.bot_username or SUBSCRIPTION_BOT_USERNAME
 
-    return f"https://t.me/{username}"
+    return f"https://t.me/{username.lstrip('@')}"
+
+
+
+
+
+def _support_link(settings: Settings) -> str:
+
+    return f"https://t.me/{settings.support_username.lstrip('@')}"
 
 
 
@@ -130,14 +138,15 @@ def _encode_happ_text(text: str) -> str:
 
 def _credential_remark(credential) -> str:
 
-    if credential.vpn_config and credential.vpn_config.name:
+    config = credential.vpn_config
 
-        return sanitize_remark(credential.vpn_config.name)
+    if config and config.name:
+
+        return sanitize_remark(config.name)
 
     device_name = credential.device.name if credential.device else "Device"
 
     return sanitize_remark(device_name)
-
 
 
 
@@ -160,13 +169,13 @@ def _build_active_headers(subscription, settings: Settings) -> dict[str, str]:
 
         "sub-expire-button-link": bot,
 
-        "support-url": bot,
+        "support-url": _support_link(settings),
 
         "sub-info-color": "green",
 
         "sub-info-text": _encode_happ_text(f"Активна до: {expires}"),
 
-        "sub-info-button-text": "Продлить",
+        "sub-info-button-text": _encode_happ_text("Продлить"),
 
         "sub-info-button-link": bot,
 
@@ -244,7 +253,7 @@ def _build_inactive_headers(subscription, settings: Settings, reason: InactiveRe
 
         "profile-title": _inactive_profile_title(reason),
 
-        "support-url": bot,
+        "support-url": _support_link(settings),
 
         "cache-control": "no-store",
 
@@ -268,7 +277,7 @@ def _build_inactive_headers(subscription, settings: Settings, reason: InactiveRe
 
         headers["sub-info-text"] = _encode_happ_text(_inactive_info_text(reason))
 
-        headers["sub-info-button-text"] = "Продлить"
+        headers["sub-info-button-text"] = _encode_happ_text("Продлить")
 
         if bot:
 
@@ -430,39 +439,43 @@ async def _resolve_inactive_reason(
 
 
 
-async def _get_vless_links(subscription, session, settings) -> list[tuple]:
+async def _get_subscription_share_links(subscription, session, settings) -> list[str]:
 
     cred_service = ConfigCredentialService(session, settings)
 
     await cred_service.ensure_credentials(subscription)
 
-    credentials = await cred_service.list_active(
-
-        subscription.id, config_type=VpnConfigType.VLESS_LINK
-
-    )
-
-    if not credentials:
-
-        credentials = await cred_service.list_active(
-
-            subscription.id, config_type=VpnConfigType.XRAY_JSON
-
-        )
-
-
+    credentials = await cred_service.list_active(subscription.id)
 
     if credentials:
 
-        return [
+        links: list[str] = []
 
-            (credential.client_uuid, _credential_remark(credential))
+        for credential in credentials:
 
-            for credential in credentials
+            if not credential.vpn_config:
 
-        ]
+                continue
 
+            links.append(
 
+                build_credential_share_link(
+
+                    credential.client_uuid,
+
+                    credential.vpn_config.config_type.value,
+
+                    credential.vpn_config.config_template,
+
+                    _credential_remark(credential),
+
+                )
+
+            )
+
+        if links:
+
+            return links
 
     device_service = DeviceService(session, settings)
 
@@ -472,7 +485,13 @@ async def _get_vless_links(subscription, session, settings) -> list[tuple]:
 
         devices = [await device_service.ensure_default_device(subscription)]
 
-    return [(device.client_uuid, sanitize_remark(device.name)) for device in devices]
+    return [
+
+        build_vless_link(device.client_uuid, sanitize_remark(device.name))
+
+        for device in devices
+
+    ]
 
 
 
@@ -522,9 +541,21 @@ async def _get_profile_link(
 
 
 
-    device_links = await _get_vless_links(subscription, session, settings)
+    device_service = DeviceService(session, settings)
 
-    return device_links[0]
+    devices = await device_service.list_devices(subscription.id)
+
+    if not devices:
+
+        devices = [await device_service.ensure_default_device(subscription)]
+
+    if devices:
+
+        device = devices[0]
+
+        return device.client_uuid, sanitize_remark(device.name)
+
+    return subscription.client_uuid, SUBSCRIPTION_REMARK
 
 
 
@@ -644,7 +675,7 @@ async def subscription_feed(
 
 
 
-    device_links = await _get_vless_links(subscription, session, settings)
+    device_links = await _get_subscription_share_links(subscription, session, settings)
 
 
 
@@ -652,7 +683,7 @@ async def subscription_feed(
 
         return PlainTextResponse(
 
-            content=build_multi_vless_links_text(device_links),
+            content="".join(f"{line}\n" for line in device_links),
 
             media_type="text/plain; charset=utf-8",
 
@@ -662,7 +693,7 @@ async def subscription_feed(
 
 
 
-    payload = build_multi_vless_subscription_payload(device_links)
+    payload = build_multi_share_links_payload(device_links)
 
     return PlainTextResponse(content=payload, media_type="text/plain; charset=utf-8", headers=headers)
 

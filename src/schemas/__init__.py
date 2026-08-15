@@ -134,6 +134,7 @@ class MiniAppSettingsRead(BaseModel):
     deposit_max_amount: int
     yookassa_enabled: bool
     bot_username: str
+    support_username: str
     referral_welcome: bool = False
 
 

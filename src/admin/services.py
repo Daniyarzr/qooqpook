@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import bcrypt
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -332,6 +332,12 @@ class AdminService:
                 "redemptions": promo_redemptions,
             },
             "infrastructure": {
+                "active_configs": (
+                    await self.session.scalar(
+                        select(func.count()).select_from(VpnConfig).where(VpnConfig.is_active.is_(True))
+                    )
+                )
+                or 0,
                 "active_servers": (
                     await self.session.scalar(
                         select(func.count()).select_from(VpnServer).where(VpnServer.is_active.is_(True))
@@ -348,15 +354,72 @@ class AdminService:
             "recent_transactions": recent_transactions,
         }
 
-    async def list_users(self, offset: int = 0, limit: int = 50) -> list[User]:
-        result = await self.session.execute(
+    async def count_users_filtered(
+        self,
+        query: str | None = None,
+        subscription_filter: str | None = None,
+    ) -> int:
+        stmt = select(func.count()).select_from(User)
+        stmt = self._apply_user_list_filters(stmt, query, subscription_filter)
+        result = await self.session.scalar(stmt)
+        return int(result or 0)
+
+    @staticmethod
+    def _apply_user_list_filters(stmt, query: str | None, subscription_filter: str | None):
+        active_sub_exists = exists(
+            select(Subscription.id)
+            .where(Subscription.user_id == User.id)
+            .where(
+                Subscription.status.in_(
+                    (
+                        SubscriptionStatus.ACTIVE,
+                        SubscriptionStatus.TRIAL,
+                        SubscriptionStatus.SUSPENDED,
+                    )
+                )
+            )
+        )
+
+        if subscription_filter == "with_sub":
+            stmt = stmt.where(active_sub_exists)
+        elif subscription_filter == "no_sub":
+            stmt = stmt.where(~active_sub_exists)
+
+        if query:
+            q = query.strip()
+            if q:
+                clauses = [
+                    User.username.ilike(f"%{q}%"),
+                    User.first_name.ilike(f"%{q}%"),
+                    User.last_name.ilike(f"%{q}%"),
+                ]
+                if q.isdigit():
+                    num = int(q)
+                    clauses.extend([User.telegram_id == num, User.id == num])
+                stmt = stmt.where(or_(*clauses))
+        return stmt
+
+    async def search_users(
+        self,
+        *,
+        query: str | None = None,
+        subscription_filter: str | None = None,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> list[User]:
+        stmt = (
             select(User)
             .options(selectinload(User.subscriptions))
             .order_by(User.created_at.desc())
             .offset(offset)
             .limit(limit)
         )
+        stmt = self._apply_user_list_filters(stmt, query, subscription_filter)
+        result = await self.session.execute(stmt)
         return list(result.scalars().unique().all())
+
+    async def list_users(self, offset: int = 0, limit: int = 50) -> list[User]:
+        return await self.search_users(offset=offset, limit=limit)
 
     @staticmethod
     def get_manageable_subscription(user: User) -> Subscription | None:
@@ -939,14 +1002,19 @@ class AdminService:
 
     async def create_vpn_config(
         self,
-        server_id: int,
         name: str,
         config_type: str,
         config_template: str,
         is_default: bool = False,
+        *,
+        server_id: int | None = None,
     ) -> VpnConfig:
         from src.services.vpn_config_store import VpnConfigStore
 
+        if server_id is None:
+            server_id = await self._get_primary_server_id()
+        if not server_id:
+            raise ValueError("Нет активного сервера для привязки конфига")
         server = await self.get_server_by_id(server_id)
         if not server:
             raise ValueError("Сервер не найден")
@@ -1104,3 +1172,18 @@ class AdminService:
 
     async def set_referral_discount_percent(self, settings: Settings, percent: int) -> int:
         return await self.set_referral_bonus_percent(settings, percent)
+
+    async def get_bot_admin_ids(self, settings: Settings) -> list[int]:
+        from src.services.system_settings import SystemSettingsService
+
+        return await SystemSettingsService(self.session, settings).get_all_bot_admin_ids()
+
+    async def add_bot_admin_id(self, settings: Settings, telegram_id: int) -> list[int]:
+        from src.services.system_settings import SystemSettingsService
+
+        return await SystemSettingsService(self.session, settings).add_bot_admin_id(telegram_id)
+
+    async def remove_bot_admin_id(self, settings: Settings, telegram_id: int) -> list[int]:
+        from src.services.system_settings import SystemSettingsService
+
+        return await SystemSettingsService(self.session, settings).remove_bot_admin_id(telegram_id)
