@@ -4,7 +4,7 @@ from decimal import Decimal
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -881,5 +881,184 @@ def create_admin_app() -> FastAPI:
         service = AdminService(session)
         await service.set_referral_bonus_percent(settings, referral_bonus_percent)
         return RedirectResponse("/settings?success=1", status_code=302)
+
+    @app.get("/telegram-admins", response_class=HTMLResponse)
+    async def telegram_admins_page(
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        admin = get_current_admin(request)
+        if not admin:
+            return RedirectResponse("/login", status_code=302)
+
+        service = AdminService(session)
+        admins = await service.list_telegram_admins()
+        return templates.TemplateResponse(
+            request,
+            "telegram_admins.html",
+            {
+                "admin": admin,
+                "admins": admins,
+                "error": request.query_params.get("error"),
+                "success": request.query_params.get("success"),
+            },
+        )
+
+    @app.post("/telegram-admins/create")
+    async def create_telegram_admin(
+        request: Request,
+        telegram_id: int = Form(...),
+        label: str = Form(""),
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        try:
+            await service.add_telegram_admin(telegram_id, label)
+        except ValueError as exc:
+            return RedirectResponse(
+                f"/telegram-admins?error={quote(str(exc))}",
+                status_code=302,
+            )
+        return RedirectResponse("/telegram-admins?success=created", status_code=302)
+
+    @app.post("/telegram-admins/{admin_id}/toggle")
+    async def toggle_telegram_admin(
+        admin_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        if not await service.toggle_telegram_admin(admin_id):
+            raise HTTPException(status_code=404, detail="Admin not found")
+        return RedirectResponse("/telegram-admins", status_code=302)
+
+    @app.post("/telegram-admins/{admin_id}/delete")
+    async def delete_telegram_admin(
+        admin_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        if not await service.delete_telegram_admin(admin_id):
+            raise HTTPException(status_code=404, detail="Admin not found")
+        return RedirectResponse("/telegram-admins?success=deleted", status_code=302)
+
+    @app.get("/keys", response_class=HTMLResponse)
+    async def keys_page(
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        admin = get_current_admin(request)
+        if not admin:
+            return RedirectResponse("/login", status_code=302)
+
+        service = AdminService(session)
+        await service.purge_revoked_manual_keys()
+        keys = await service.list_manual_keys(active_only=True)
+        servers = await service.list_servers()
+        from src.services.vpn_config import build_vless_link, sanitize_remark
+
+        def _is_internal(server) -> bool:
+            name = (server.name or "").casefold()
+            return any(t in name for t in ("внутренн", "internal", "panel tunnel"))
+
+        key_rows = []
+        created_vless = None
+        created_id = request.query_params.get("id")
+        for key in keys:
+            server = key.server
+            flag = (server.country_flag or "").strip() if server else ""
+            remark = sanitize_remark(
+                key.label
+                or (
+                    f"{flag} {server.name}".strip()
+                    if server and flag
+                    else (server.name if server else "Key")
+                )
+            )
+            vless = build_vless_link(key.client_uuid, remark)
+            key_rows.append({"key": key, "vless": vless, "remark": remark})
+            if created_id and str(key.id) == created_id:
+                created_vless = vless
+
+        return templates.TemplateResponse(
+            request,
+            "keys.html",
+            {
+                "admin": admin,
+                "key_rows": key_rows,
+                "servers": [s for s in servers if s.is_active and not _is_internal(s)],
+                "error": request.query_params.get("error"),
+                "success": request.query_params.get("success"),
+                "created_vless": created_vless,
+                "created_id": created_id,
+            },
+        )
+
+    async def _sync_xray_background() -> None:
+        import logging
+
+        from src.db.session import async_session_factory
+        from src.services import SubscriptionService
+
+        try:
+            async with async_session_factory() as session:
+                await SubscriptionService(session, settings).sync_xray_clients()
+                await session.commit()
+        except Exception:
+            logging.getLogger(__name__).exception("Background Xray sync failed")
+
+    @app.post("/keys/create")
+    async def create_key(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        server_id: int = Form(...),
+        label: str = Form(""),
+        session: AsyncSession = Depends(get_session),
+    ):
+        admin = get_current_admin(request)
+        if not admin:
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        try:
+            key, _vless, _sync_ok = await service.create_manual_key(
+                server_id=server_id,
+                label=label,
+                created_by=admin,
+                sync_now=False,
+            )
+        except ValueError as exc:
+            return RedirectResponse(
+                f"/keys?error={quote(str(exc))}",
+                status_code=302,
+            )
+        background_tasks.add_task(_sync_xray_background)
+        return RedirectResponse(
+            f"/keys?success=created&id={key.id}",
+            status_code=302,
+        )
+
+    @app.post("/keys/{key_id}/delete")
+    @app.post("/keys/{key_id}/revoke")
+    async def delete_key(
+        key_id: int,
+        request: Request,
+        background_tasks: BackgroundTasks,
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        deleted = await service.delete_manual_key(key_id)
+        if deleted:
+            background_tasks.add_task(_sync_xray_background)
+        # Уже удалён / повторный клик — всё равно на список, без 404
+        return RedirectResponse("/keys?success=deleted", status_code=302)
 
     return app

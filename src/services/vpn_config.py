@@ -244,14 +244,21 @@ def get_vpn_architecture_info() -> dict[str, str | int]:
 def build_vless_link(
     client_uuid: uuid.UUID,
     remark: str = DEFAULT_REMARK,
+    *,
+    host: str | None = None,
+    port: int | None = None,
+    sni: str | None = None,
 ) -> str:
-    """VLESS TLS share link — Yandex tunnel entry."""
+    """VLESS TLS share link — entry node (по умолчанию Yandex tunnel)."""
     name = quote(sanitize_remark(remark), safe="")
+    entry_host = host or VPN_HOST
+    entry_port = port or VPN_PORT
+    entry_sni = sni or VPN_SNI
     params = (
-        f"encryption=none&security=tls&sni={VPN_SNI}"
+        f"encryption=none&security=tls&sni={entry_sni}"
         f"&type={VPN_NETWORK}&headerType=none"
     )
-    return f"vless://{client_uuid}@{VPN_HOST}:{VPN_PORT}?{params}#{name}"
+    return f"vless://{client_uuid}@{entry_host}:{entry_port}?{params}#{name}"
 
 
 def build_vless_subscription_payload(client_uuid: uuid.UUID, remark: str = DEFAULT_REMARK) -> str:
@@ -261,14 +268,23 @@ def build_vless_subscription_payload(client_uuid: uuid.UUID, remark: str = DEFAU
 
 
 def build_multi_vless_subscription_payload(
-    links: list[tuple[uuid.UUID, str]],
+    links: list[tuple],
 ) -> str:
-    body = "".join(build_vless_link(client_uuid, remark) + "\n" for client_uuid, remark in links)
+    """links: (uuid, remark) или (uuid, remark, host, port)."""
+    body = "".join(_link_from_tuple(item) + "\n" for item in links)
     return base64.b64encode(body.encode("utf-8")).decode("ascii")
 
 
-def build_multi_vless_links_text(links: list[tuple[uuid.UUID, str]]) -> str:
-    return "".join(build_vless_link(client_uuid, remark) + "\n" for client_uuid, remark in links)
+def build_multi_vless_links_text(links: list[tuple]) -> str:
+    return "".join(_link_from_tuple(item) + "\n" for item in links)
+
+
+def _link_from_tuple(item: tuple) -> str:
+    if len(item) >= 4:
+        client_uuid, remark, host, port = item[0], item[1], item[2], item[3]
+        return build_vless_link(client_uuid, remark, host=host, port=port)
+    client_uuid, remark = item[0], item[1]
+    return build_vless_link(client_uuid, remark)
 
 
 EXPIRED_PLACEHOLDER_UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")

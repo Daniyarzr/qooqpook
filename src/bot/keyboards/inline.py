@@ -36,6 +36,28 @@ def back_to_menu() -> InlineKeyboardMarkup:
     )
 
 
+def broadcast_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Отправить всем", callback_data="broadcast:send"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="broadcast:cancel"),
+            ]
+        ]
+    )
+
+
+def direct_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Отправить", callback_data="dm:send"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="dm:cancel"),
+            ]
+        ]
+    )
+
+
 def subscription_menu(
     has_subscription: bool,
     trial_used: bool,
@@ -72,30 +94,50 @@ def subscription_menu(
 
 
 def devices_keyboard(
-    devices: list,
-    can_add: bool,
+    devices: list | None = None,
+    can_add: bool = False,
     can_restore: bool = False,
+    hwids: list | None = None,
 ) -> InlineKeyboardMarkup:
     buttons = []
-    for device in devices:
+    # Реальные клиенты (HWID) — то, что считается в лимите
+    for entry in hwids or []:
+        label = getattr(entry, "label", None) or f"Устройство #{entry.id}"
+        short = label if len(label) <= 28 else label[:27] + "…"
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text=f"🗑 {device.name}",
-                    callback_data=f"sub:device:del:{device.id}",
+                    text=f"🗑 {short}",
+                    callback_data=f"sub:hwid:del:{entry.id}",
                 )
             ]
         )
-    if can_add:
-        buttons.append(
-            [InlineKeyboardButton(text="➕ Добавить устройство", callback_data="sub:device:add")]
-        )
+    # Legacy named slots (если ещё есть и нет HWID-списка)
+    if not hwids:
+        for device in devices or []:
+            buttons.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"🗑 {device.name}",
+                        callback_data=f"sub:device:del:{device.id}",
+                    )
+                ]
+            )
     if can_restore:
         buttons.append(
             [InlineKeyboardButton(text="✅ Восстановить подписку", callback_data="sub:restore")]
         )
     buttons.append([InlineKeyboardButton(text="◀️ К подписке", callback_data="sub:status")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def broadcast_menu_keyboard() -> InlineKeyboardMarkup:
+    """Кнопка под сообщением рассылки."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main")],
+        ]
+    )
 
 
 def plans_keyboard(plans: list) -> InlineKeyboardMarkup:

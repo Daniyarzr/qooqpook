@@ -16,7 +16,7 @@ from src.core.utils import build_subscription_url, format_datetime_ru, utcnow
 from src.models import PaymentOrder, Transaction
 from src.repositories import PaymentOrderRepository, PlanRepository, UserRepository
 from src.services import BalanceService
-from src.services.notifications import send_telegram_message
+from src.services.notifications import notify_telegram_admins, send_telegram_message
 from src.services.yookassa import YooKassaClient, YooKassaError
 
 logger = logging.getLogger(__name__)
@@ -127,7 +127,7 @@ class PaymentService:
             raise ValueError(f"Maximum amount is {self.settings.deposit_max_amount} ₽")
 
     async def process_payment_success(self, external_id: str) -> PaymentOrder | None:
-        order = await self.orders.get_by_external_id(external_id)
+        order = await self.orders.get_by_external_id_for_update(external_id)
         if not order:
             logger.warning("Payment order not found for external_id=%s", external_id)
             return None
@@ -135,6 +135,8 @@ class PaymentService:
         if order.status == PaymentStatus.SUCCEEDED:
             if order.purpose == PaymentOrderPurpose.SUBSCRIPTION:
                 await self._ensure_subscription_fulfilled(order)
+            elif order.purpose == PaymentOrderPurpose.DEPOSIT:
+                await self._ensure_deposit_fulfilled(order)
             return order
 
         try:
@@ -166,12 +168,51 @@ class PaymentService:
         order.status = PaymentStatus.SUCCEEDED
         order.paid_at = utcnow()
         await self.session.flush()
+        # Уведомление админов только при первом переходе PENDING → SUCCEEDED
+        await self._notify_admins_about_order(order)
         return order
+
+    async def _notify_admins_about_order(self, order: PaymentOrder) -> None:
+        user = await self.users.get_by_id(order.user_id)
+        user_label = "—"
+        tg_id = "—"
+        if user:
+            tg_id = str(user.telegram_id)
+            parts = [p for p in [user.username and f"@{user.username}", user.first_name] if p]
+            user_label = " / ".join(parts) if parts else f"id={user.id}"
+
+        if order.purpose == PaymentOrderPurpose.SUBSCRIPTION:
+            plan = await self.plans.get_by_id(order.plan_id) if order.plan_id else None
+            plan_name = plan.name if plan else f"plan#{order.plan_id}"
+            text = (
+                "💳 <b>Новый платёж — подписка</b>\n\n"
+                f"👤 {user_label}\n"
+                f"🆔 Telegram ID: <code>{tg_id}</code>\n"
+                f"💎 Тариф: <b>{plan_name}</b>\n"
+                f"💰 Сумма: <b>{order.amount} ₽</b>\n"
+                f"🧾 Заказ: <code>#{order.id}</code>\n"
+                f"🏦 ЮKassa: <code>{order.external_id}</code>"
+            )
+        else:
+            text = (
+                "💳 <b>Новый платёж — пополнение</b>\n\n"
+                f"👤 {user_label}\n"
+                f"🆔 Telegram ID: <code>{tg_id}</code>\n"
+                f"💰 Сумма: <b>{order.amount} ₽</b>\n"
+                f"🧾 Заказ: <code>#{order.id}</code>\n"
+                f"🏦 ЮKassa: <code>{order.external_id}</code>"
+            )
+        await notify_telegram_admins(self.session, self.settings, text)
 
     async def _ensure_subscription_fulfilled(self, order: PaymentOrder) -> None:
         if await self._is_subscription_fulfilled(order):
             return
         await self._fulfill_subscription_order(order)
+
+    async def _ensure_deposit_fulfilled(self, order: PaymentOrder) -> None:
+        if await self._is_deposit_fulfilled(order):
+            return
+        await self._fulfill_deposit_order(order, notify_user=False)
 
     async def _is_subscription_fulfilled(self, order: PaymentOrder) -> bool:
         marker = f"(#{order.id})"
@@ -186,7 +227,28 @@ class PaymentService:
         )
         return result.scalar_one_or_none() is not None
 
-    async def _fulfill_deposit_order(self, order: PaymentOrder) -> PaymentOrder:
+    async def _is_deposit_fulfilled(self, order: PaymentOrder) -> bool:
+        marker = f"(#{order.id})"
+        result = await self.session.execute(
+            select(Transaction.id)
+            .where(
+                Transaction.user_id == order.user_id,
+                Transaction.type == TransactionType.DEPOSIT,
+                Transaction.description.like(f"%{marker}%"),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def _fulfill_deposit_order(
+        self,
+        order: PaymentOrder,
+        *,
+        notify_user: bool = True,
+    ) -> PaymentOrder:
+        if await self._is_deposit_fulfilled(order):
+            return order
+
         tx = await self.balance.add_balance(
             user_id=order.user_id,
             amount=order.amount,
@@ -204,7 +266,7 @@ class PaymentService:
                 tx.id,
             )
 
-        if user:
+        if notify_user and user:
             await self._notify_deposit(user.telegram_id, order.amount, tx.balance_after)
 
         return order

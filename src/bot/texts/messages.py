@@ -20,14 +20,12 @@ WELCOME_BACK = """
 """
 
 PROFILE = """
-👤 <b>Ваш профиль</b>
+👤 <b>{display_name}</b>{username_suffix}
+🆔 <code>{telegram_id}</code> · 📅 {created_at}
 
-🆔 ID: <code>{telegram_id}</code>
-🔑 UUID подписки: <code>{uuid}</code>
-💰 Баланс: <b>{balance} ₽</b>
-📎 Реф. код: <code>{referral_code}</code>
-👥 Приглашено: <b>{referrals_count}</b>
-📅 Регистрация: {created_at}
+💳 Баланс: <b>{balance} ₽</b>
+🛡 {subscription_line}
+🎁 Реф. код: <code>{referral_code}</code> · приглашено: <b>{referrals_count}</b>
 """
 
 SUBSCRIPTION_ACTIVE = """
@@ -44,19 +42,19 @@ SUBSCRIPTION_ACTIVE = """
 DEVICES_HEADER = """
 📱 <b>Ваши устройства</b> ({count}/{max_devices})
 
-Каждое устройство имеет свой UUID. Обновите подписку в VPN-клиенте после изменений.
+Работают первые <b>{max_devices}</b> по дате подключения.
+Остальные видят лимит, пока не удалите лишние.
 
 """
 
 DEVICES_ITEM = """
-<b>{name}</b>
+{status} <b>{name}</b>
 🔑 <code>{uuid}</code>
-📊 Трафик: {traffic} GB
-📅 {created}
+📅 Последний вход: {created}
 
 """
 
-DEVICES_NONE = "Устройств пока нет."
+DEVICES_NONE = "Пока нет подключений. Откройте подписку в VPN-клиенте (Happ и др.)."
 DEVICES_LIMIT = "Достигнут лимит устройств ({max_devices}). Удалите одно, чтобы добавить новое."
 
 SUBSCRIPTION_RESTORED = """
@@ -66,11 +64,12 @@ SUBSCRIPTION_RESTORED = """
 """
 
 SUBSCRIPTION_SUSPENDED_DEVICES = """
-⚠️ <b>Подписка приостановлена</b>
+⚠️ <b>Лимит устройств</b>
 
-Обнаружено подключение <b>более {max_devices} устройств</b>. Разрешено не более {max_devices} на одну подписку.
+Разрешено не более <b>{max_devices}</b> устройств на подписку.
+Первые {max_devices} продолжают работать; лишние не получают доступ.
 
-Удалите лишние устройства и нажмите «✅ Восстановить подписку».
+Откройте «📱 Устройства» и удалите ненужные.
 """
 
 SUBSCRIPTION_SUSPENDED = """

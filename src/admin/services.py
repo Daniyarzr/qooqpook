@@ -1104,3 +1104,151 @@ class AdminService:
 
     async def set_referral_discount_percent(self, settings: Settings, percent: int) -> int:
         return await self.set_referral_bonus_percent(settings, percent)
+
+    # ── Telegram admins (уведомления о платежах) ─────────────────
+
+    async def list_telegram_admins(self):
+        from src.models import TelegramAdmin
+
+        result = await self.session.execute(
+            select(TelegramAdmin).order_by(TelegramAdmin.id.desc())
+        )
+        return list(result.scalars().all())
+
+    async def add_telegram_admin(self, telegram_id: int, label: str | None = None):
+        from src.models import TelegramAdmin
+
+        if telegram_id <= 0:
+            raise ValueError("Telegram ID должен быть положительным числом")
+
+        existing = await self.session.execute(
+            select(TelegramAdmin).where(TelegramAdmin.telegram_id == telegram_id)
+        )
+        if existing.scalar_one_or_none():
+            raise ValueError(f"Админ с Telegram ID {telegram_id} уже добавлен")
+
+        admin = TelegramAdmin(
+            telegram_id=telegram_id,
+            label=(label or "").strip() or None,
+            is_active=True,
+        )
+        self.session.add(admin)
+        await self.session.flush()
+        await self.session.refresh(admin)
+        return admin
+
+    async def delete_telegram_admin(self, admin_id: int) -> bool:
+        from src.models import TelegramAdmin
+
+        admin = await self.session.get(TelegramAdmin, admin_id)
+        if not admin:
+            return False
+        await self.session.delete(admin)
+        await self.session.flush()
+        return True
+
+    async def toggle_telegram_admin(self, admin_id: int) -> bool:
+        from src.models import TelegramAdmin
+
+        admin = await self.session.get(TelegramAdmin, admin_id)
+        if not admin:
+            return False
+        admin.is_active = not admin.is_active
+        await self.session.flush()
+        return True
+
+    # ── Manual VPN keys ──────────────────────────────────────────
+
+    async def list_manual_keys(self, *, active_only: bool = True):
+        from src.models import ManualVpnKey
+
+        stmt = (
+            select(ManualVpnKey)
+            .options(selectinload(ManualVpnKey.server))
+            .order_by(ManualVpnKey.id.desc())
+        )
+        if active_only:
+            stmt = stmt.where(ManualVpnKey.revoked_at.is_(None))
+        result = await self.session.execute(stmt)
+        return list(result.scalars().unique().all())
+
+    async def purge_revoked_manual_keys(self) -> int:
+        from src.models import ManualVpnKey
+
+        result = await self.session.execute(
+            select(ManualVpnKey).where(ManualVpnKey.revoked_at.is_not(None))
+        )
+        rows = list(result.scalars().all())
+        for row in rows:
+            await self.session.delete(row)
+        if rows:
+            await self.session.flush()
+        return len(rows)
+
+    async def create_manual_key(
+        self,
+        server_id: int,
+        label: str | None = None,
+        created_by: str | None = None,
+        expires_at=None,
+        *,
+        sync_now: bool = False,
+        settings: Settings | None = None,
+    ):
+        import logging
+        import uuid as uuid_std
+
+        from src.models import ManualVpnKey, VpnServer
+        from src.services.vpn_config import build_vless_link, sanitize_remark
+
+        server = await self.session.get(VpnServer, server_id)
+        if not server or not server.is_active:
+            raise ValueError("Сервер не найден или выключен")
+
+        key = ManualVpnKey(
+            server_id=server.id,
+            client_uuid=uuid_std.uuid4(),
+            label=(label or "").strip() or None,
+            created_by=created_by,
+            expires_at=expires_at,
+        )
+        self.session.add(key)
+        await self.session.flush()
+        await self.session.refresh(key)
+
+        sync_ok = True
+        if sync_now and settings:
+            from src.services import SubscriptionService
+
+            try:
+                sync_ok = bool(
+                    await SubscriptionService(self.session, settings).sync_xray_clients()
+                )
+            except Exception:
+                sync_ok = False
+                logging.getLogger(__name__).exception(
+                    "Xray sync failed after creating manual key %s", key.id
+                )
+
+        flag = (server.country_flag or "").strip()
+        remark_source = key.label or (
+            f"{flag} {server.name}".strip() if flag else server.name
+        )
+        remark = sanitize_remark(remark_source)
+        vless = build_vless_link(key.client_uuid, remark)
+        return key, vless, sync_ok
+
+    async def delete_manual_key(self, key_id: int) -> bool:
+        """Полностью удаляет ключ из БД (отозванные в списке не держим)."""
+        from src.models import ManualVpnKey
+
+        key = await self.session.get(ManualVpnKey, key_id)
+        if not key:
+            return False
+        await self.session.delete(key)
+        await self.session.flush()
+        return True
+
+    async def revoke_manual_key(self, key_id: int, settings: Settings | None = None) -> bool:
+        """Обратная совместимость: отзыв = удаление."""
+        return await self.delete_manual_key(key_id)

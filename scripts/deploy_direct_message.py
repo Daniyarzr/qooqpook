@@ -1,0 +1,90 @@
+"""Deploy direct-message admin feature; restart bot only."""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+import paramiko
+
+HOST = "148.135.184.188"
+PASSWORD = os.environ.get("DEPLOY_PASSWORD")
+if not PASSWORD:
+    raise SystemExit("Set DEPLOY_PASSWORD")
+
+REMOTE = "/opt/qooq-vpn"
+PROJECT = Path(__file__).resolve().parent.parent
+
+FILES = [
+    "src/bot/app.py",
+    "src/bot/states.py",
+    "src/bot/keyboards/reply.py",
+    "src/bot/keyboards/__init__.py",
+    "src/bot/keyboards/inline.py",
+    "src/bot/handlers/direct_message.py",
+    "src/repositories/__init__.py",
+]
+
+
+def ensure_dir(sftp, path: str) -> None:
+    parts = path.strip("/").split("/")
+    cur = ""
+    for p in parts:
+        cur += "/" + p
+        try:
+            sftp.stat(cur)
+        except FileNotFoundError:
+            sftp.mkdir(cur)
+
+
+def run(client, cmd, timeout=90):
+    _, stdout, stderr = client.exec_command(cmd, timeout=timeout)
+    out = stdout.read().decode("utf-8", errors="replace")
+    err = stderr.read().decode("utf-8", errors="replace")
+    code = stdout.channel.recv_exit_status()
+    return out, err, code
+
+
+def main() -> int:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(HOST, username="root", password=PASSWORD, timeout=30, banner_timeout=30)
+
+    sftp = client.open_sftp()
+    for rel in FILES:
+        remote = f"{REMOTE}/{rel}"
+        ensure_dir(sftp, str(Path(remote).parent).replace("\\", "/"))
+        print("Upload", rel)
+        sftp.put(str(PROJECT / rel), remote)
+    sftp.close()
+
+    out, err, _ = run(
+        client,
+        "cd /opt/qooq-vpn && .venv/bin/python -c "
+        "\"from src.bot.handlers import direct_message; from src.bot.app import create_bot; print('import_ok')\"",
+    )
+    print(out)
+    if err:
+        print(err)
+    if "import_ok" not in out:
+        print("ABORT")
+        client.close()
+        return 1
+
+    out, err, _ = run(
+        client,
+        "systemctl restart qooq-bot && sleep 3 && systemctl is-active qooq-bot && "
+        "journalctl -u qooq-bot --since '20 sec ago' --no-pager | tail -n 12",
+    )
+    print(out)
+    if err:
+        print(err)
+    client.close()
+    print("DONE")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

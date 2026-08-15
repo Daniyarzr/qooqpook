@@ -9,7 +9,7 @@ router = APIRouter()
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "miniapp"
 _INDEX_HTML = _STATIC_DIR / "index.html"
-_VERSION = "4"
+_VERSION = "6"
 
 
 @router.get("/miniapp", response_class=HTMLResponse)

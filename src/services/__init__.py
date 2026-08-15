@@ -4,6 +4,7 @@ import uuid as uuid_std
 from datetime import timedelta
 from decimal import Decimal
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import Settings
@@ -131,8 +132,15 @@ class SubscriptionService:
             existing.status = SubscriptionStatus.ACTIVE
             existing.is_trial = False
             existing.plan_id = plan.id
+            existing.suspension_reason = None
+            existing.device_limit_notified_at = None
             await self.subscriptions.update(existing)
             subscription = existing
+            from src.services.device_limit import DeviceLimitService
+
+            await DeviceLimitService(self.session, self.settings).purge_phantom_hwids(
+                subscription.id
+            )
         else:
             subscription = Subscription(
                 user_id=user_id,
@@ -216,6 +224,9 @@ class SubscriptionService:
         if not self.settings.xray_sync_enabled:
             return False
 
+        from src.models import ManualVpnKey
+        from src.core.utils import utcnow
+
         cred_service = ConfigCredentialService(self.session, self.settings)
         credentials = await cred_service.get_all_for_active_subscriptions()
         clients = [
@@ -227,7 +238,31 @@ class SubscriptionService:
             for credential in credentials
             if credential.subscription
         ]
-        return await asyncio.to_thread(sync_active_clients, self.settings, clients)
+
+        result = await self.session.execute(
+            select(ManualVpnKey).where(
+                ManualVpnKey.revoked_at.is_(None),
+                (ManualVpnKey.expires_at.is_(None)) | (ManualVpnKey.expires_at > utcnow()),
+            )
+        )
+        for key in result.scalars().all():
+            clients.append(
+                XrayClient(
+                    user_id=0,
+                    credential_id=key.id,
+                    client_uuid=key.client_uuid,
+                    email_override=f"qooq-manual-{key.id}",
+                )
+            )
+
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(sync_active_clients, self.settings, clients),
+                timeout=25,
+            )
+        except asyncio.TimeoutError:
+            logger.error("Xray sync timed out after 25s")
+            return False
 
     async def build_hub_data(self, subscription: Subscription | None, bot_username: str) -> dict:
         bot_link = f"https://t.me/{bot_username}"
@@ -276,13 +311,30 @@ class SubscriptionService:
         configs = []
         if vless_credentials:
             for credential in vless_credentials:
-                name = (
-                    sanitize_remark(credential.vpn_config.name)
-                    if credential.vpn_config and credential.vpn_config.name
-                    else sanitize_remark(
+                server = (
+                    credential.vpn_config.server
+                    if credential.vpn_config and getattr(credential.vpn_config, "server", None)
+                    else None
+                )
+                if (
+                    server
+                    and server.name
+                    and not any(
+                        t in server.name.casefold()
+                        for t in ("внутренн", "internal", "panel tunnel", "tunnel")
+                    )
+                ):
+                    flag = (server.country_flag or "").strip()
+                    name = sanitize_remark(
+                        f"{flag} {server.name}".strip() if flag else server.name
+                    )
+                elif credential.vpn_config and credential.vpn_config.name:
+                    name = sanitize_remark(credential.vpn_config.name)
+                else:
+                    name = sanitize_remark(
                         credential.device.name if credential.device else "Device"
                     )
-                )
+                # Всегда entry-нода (Yandex) — внутренний panel host в клиент не отдаём
                 configs.append(build_vless_link(credential.client_uuid, name))
         else:
             devices = list(subscription.devices) if subscription.devices else []

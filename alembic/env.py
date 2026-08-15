@@ -7,6 +7,7 @@ from src.core.config import get_settings
 from src.db.base import Base
 from src.models import (  # noqa: F401 — register models
     AdminUser,
+    ManualVpnKey,
     PaymentOrder,
     PromoCode,
     PromoCodeRedemption,
@@ -17,6 +18,7 @@ from src.models import (  # noqa: F401 — register models
     SubscriptionDevice,
     SubscriptionHwid,
     SubscriptionPlan,
+    TelegramAdmin,
     Transaction,
     User,
     VpnConfig,

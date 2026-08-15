@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Ключи{% endblock %}
+{% block content %}
+<h2>🔑 Отдельные ключи</h2>
+<p class="muted" style="margin-bottom:20px;">
+    Разовый VLESS-ключ для выбранного сервера. Не привязан к подписке — можно выдать вручную.
+</p>
+
+{% if error %}
+<div class="flash flash-error" style="margin-bottom:16px;">⚠️ {{ error }}</div>
+{% endif %}
+{% if success == 'created' %}
+<div class="flash flash-success" style="margin-bottom:16px;">✅ Ключ{% if created_id %} #{{ created_id }}{% endif %} создан</div>
+{% elif success == 'deleted' or success == 'revoked' %}
+<div class="flash flash-success" style="margin-bottom:16px;">✅ Ключ удалён</div>
+{% endif %}
+
+{% if created_vless %}
+<section class="card" style="margin-bottom:24px;border-color:#238636;">
+    <h3>Новый ключ — скопируйте</h3>
+    <div class="key-copy-row">
+        <input type="text" class="input-sm key-vless-input" id="created-vless" readonly value="{{ created_vless }}">
+        <button type="button" class="btn-sm btn-success" data-copy-target="created-vless">📋 Копировать</button>
+    </div>
+</section>
+{% endif %}
+
+<section class="card" style="margin-bottom:24px;">
+    <h3>Создать ключ</h3>
+    <form method="post" action="/keys/create" class="inline-form" id="create-key-form">
+        <select name="server_id" class="input-sm" required>
+            <option value="">Выберите сервер…</option>
+            {% for server in servers %}
+            <option value="{{ server.id }}">
+                {{ server.country_flag }} {{ server.name }} ({{ server.country }})
+            </option>
+            {% endfor %}
+        </select>
+        <input type="text" name="label" placeholder="Метка (необязательно)" class="input-sm" style="flex:1;">
+        <button type="submit" class="btn-sm btn-success" id="create-key-btn">➕ Создать</button>
+    </form>
+    {% if not servers %}
+    <p class="muted" style="margin-top:12px;">Нет подходящих серверов — добавьте в разделе «Серверы».</p>
+    {% endif %}
+</section>
+
+<div class="table-wrap">
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Сервер</th>
+            <th>Метка</th>
+            <th>VLESS</th>
+            <th>Создан</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in key_rows %}
+        {% set key = row.key %}
+        <tr>
+            <td>{{ key.id }}</td>
+            <td>
+                {% if key.server %}
+                {{ key.server.country_flag }} {{ key.server.name }}
+                {% else %}—{% endif %}
+            </td>
+            <td>{{ key.label or "—" }}</td>
+            <td style="min-width:280px;">
+                <div class="key-copy-row">
+                    <input type="text" class="input-sm key-vless-input" id="vless-{{ key.id }}" readonly value="{{ row.vless }}">
+                    <button type="button" class="btn-sm" data-copy-target="vless-{{ key.id }}">📋</button>
+                </div>
+            </td>
+            <td class="muted" style="white-space:nowrap;font-size:12px;">
+                {{ key.created_at.strftime('%d.%m.%Y %H:%M') if key.created_at else "—" }}
+                {% if key.created_by %}<br>{{ key.created_by }}{% endif %}
+            </td>
+            <td>
+                <form method="post" action="/keys/{{ key.id }}/delete" class="js-once-form"
+                      onsubmit="return confirm('Удалить ключ #{{ key.id }}? Его нельзя будет восстановить.');">
+                    <button type="submit" class="btn-sm btn-danger">🗑 Удалить</button>
+                </form>
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="text-align:center;color:#8b949e;">Ключей пока нет</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<style>
+.key-copy-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+}
+.key-vless-input {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px !important;
+    color: #c9d1d9 !important;
+    background: #0d1117 !important;
+    cursor: text;
+}
+.flash-error {
+    background: rgba(248, 81, 73, 0.12);
+    border: 1px solid rgba(248, 81, 73, 0.35);
+    color: #f85149;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 14px;
+}
+.copy-toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #238636;
+    color: #fff;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    z-index: 9999;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+</style>
+<script>
+(function () {
+  function toast(text) {
+    var el = document.createElement("div");
+    el.className = "copy-toast";
+    el.textContent = text;
+    document.body.appendChild(el);
+    setTimeout(function () { el.remove(); }, 1600);
+  }
+
+  async function copyValue(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (e) {}
+    }
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) {}
+    ta.remove();
+    return ok;
+  }
+
+  document.addEventListener("click", async function (ev) {
+    var btn = ev.target.closest("[data-copy-target]");
+    if (!btn) return;
+    ev.preventDefault();
+    var input = document.getElementById(btn.getAttribute("data-copy-target"));
+    if (!input) return;
+    var ok = await copyValue(input.value);
+    toast(ok ? "Скопировано" : "Не удалось скопировать — выделите поле вручную");
+    if (ok) {
+      input.focus();
+      input.select();
+    }
+  });
+
+  document.querySelectorAll(".js-once-form, #create-key-form").forEach(function (form) {
+    form.addEventListener("submit", function () {
+      var btn = form.querySelector('button[type="submit"]');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = btn.textContent.indexOf("Создать") >= 0 ? "Создаём…" : "Удаляем…";
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

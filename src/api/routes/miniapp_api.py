@@ -61,12 +61,17 @@ async def _build_subscription_read(
         devices = [await device_service.ensure_default_device(subscription)]
 
     limit_service = DeviceLimitService(session, settings)
-    hwid_count = await limit_service.count_hwids(subscription.id)
-    suspended = (
+    await limit_service.purge_phantom_hwids(subscription.id)
+    if (
         subscription.status == SubscriptionStatus.SUSPENDED
         and subscription.suspension_reason == SuspensionReason.DEVICE_LIMIT.value
-    )
-    can_restore = suspended and len(devices) <= settings.max_devices_per_subscription
+    ):
+        await limit_service.lift_legacy_device_limit_suspend(subscription)
+
+    hwid_count = await limit_service.count_hwids(subscription.id)
+    suspended = False  # глобальную заморозку по лимиту больше не используем
+    can_restore = False
+    overflow = hwid_count > settings.max_devices_per_subscription
 
     sub_read = MiniAppSubscriptionRead(
         id=subscription.id,
@@ -76,9 +81,9 @@ async def _build_subscription_read(
         is_trial=subscription.is_trial,
         subscription_url=build_subscription_url(settings.hub_domain, subscription.subscription_token),
         duration_remaining=format_duration_until(subscription.expires_at),
-        device_count=max(len(devices), hwid_count),
+        device_count=hwid_count,
         max_devices=settings.max_devices_per_subscription,
-        suspended_device_limit=suspended,
+        suspended_device_limit=overflow,
         can_restore=can_restore,
         hwid_count=hwid_count,
     )
@@ -224,6 +229,22 @@ async def purchase_plan(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    from src.services.notifications import notify_telegram_admins
+
+    uname = f"@{user.username}" if user.username else (user.first_name or "—")
+    await notify_telegram_admins(
+        session,
+        settings,
+        (
+            "💳 <b>Новый платёж — подписка (баланс, Mini App)</b>\n\n"
+            f"👤 {uname}\n"
+            f"🆔 Telegram ID: <code>{user.telegram_id}</code>\n"
+            f"💎 Тариф: <b>{plan.name}</b>\n"
+            f"💰 Сумма: <b>{pricing.final_price} ₽</b>\n"
+            "🏦 Способ: баланс"
+        ),
+    )
 
     user = await UserRepository(session).get_by_id(user.id)
     return await build_bootstrap(session, settings, user)
@@ -401,7 +422,7 @@ async def delete_device(
 
     await sub_service.sync_xray_clients()
     limit_service = DeviceLimitService(session, settings)
-    await limit_service.try_reactivate(subscription)
+    await limit_service.try_reactivate(subscription, clear_hwids=False)
 
     return await build_bootstrap(session, settings, user)
 
@@ -418,16 +439,16 @@ async def restore_subscription(
     if not subscription:
         raise HTTPException(status_code=400, detail="No subscription")
 
-    device_service = DeviceService(session, settings)
-    devices = await device_service.list_devices(subscription.id)
-    if len(devices) > settings.max_devices_per_subscription:
+    limit_service = DeviceLimitService(session, settings)
+    await limit_service.purge_phantom_hwids(subscription.id)
+    hwid_count = await limit_service.count_hwids(subscription.id)
+    if hwid_count > settings.max_devices_per_subscription:
         raise HTTPException(
             status_code=400,
-            detail=f"Remove extra devices ({len(devices)}/{settings.max_devices_per_subscription})",
+            detail=f"Remove extra devices ({hwid_count}/{settings.max_devices_per_subscription})",
         )
 
-    limit_service = DeviceLimitService(session, settings)
-    if not await limit_service.try_reactivate(subscription):
+    if not await limit_service.try_reactivate(subscription, clear_hwids=True):
         raise HTTPException(status_code=400, detail="Could not restore subscription")
 
     return await build_bootstrap(session, settings, user)

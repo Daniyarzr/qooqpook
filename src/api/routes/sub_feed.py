@@ -130,13 +130,45 @@ def _encode_happ_text(text: str) -> str:
 
 def _credential_remark(credential) -> str:
 
-    if credential.vpn_config and credential.vpn_config.name:
+    config = credential.vpn_config
 
-        return sanitize_remark(credential.vpn_config.name)
+    server = getattr(config, "server", None) if config else None
+
+    # Имя сервера, если оно осмысленное для клиента; иначе имя конфига
+
+    if server and server.name and not _is_internal_server_name(server.name):
+
+        flag = (server.country_flag or "").strip()
+
+        label = f"{flag} {server.name}".strip() if flag else server.name
+
+        return sanitize_remark(label)
+
+    if config and config.name:
+
+        return sanitize_remark(config.name)
 
     device_name = credential.device.name if credential.device else "Device"
 
     return sanitize_remark(device_name)
+
+
+
+
+def _is_internal_server_name(name: str) -> bool:
+
+    lowered = name.casefold()
+
+    return any(token in lowered for token in ("внутренн", "internal", "panel tunnel", "tunnel"))
+
+
+
+
+def _credential_vless_tuple(credential) -> tuple:
+
+    """Клиенты всегда заходят через entry-ноду; UUID синкаются на Yandex."""
+
+    return (credential.client_uuid, _credential_remark(credential))
 
 
 
@@ -166,9 +198,13 @@ def _build_active_headers(subscription, settings: Settings) -> dict[str, str]:
 
         "sub-info-text": _encode_happ_text(f"Активна до: {expires}"),
 
-        "sub-info-button-text": "Продлить",
+        "sub-info-button-text": _encode_happ_text("Продлить"),
 
         "sub-info-button-link": bot,
+
+        "subscription-always-hwid-enable": "1",
+
+        "x-hwid-active": "true",
 
         "cache-control": "no-store",
 
@@ -216,9 +252,11 @@ def _inactive_info_text(reason: InactiveReason) -> str:
 
         return (
 
-            "Подписка приостановлена: превышен лимит устройств. "
+            "Лимит устройств: это устройство сверх нормы. "
 
-            "Удалите лишние устройства и восстановите подписку в боте."
+            "Первые устройства продолжают работать. "
+
+            "Удалите лишние в боте → Устройства."
 
         )
 
@@ -250,6 +288,10 @@ def _build_inactive_headers(subscription, settings: Settings, reason: InactiveRe
 
         "content-disposition": 'attachment; filename="qooq-expired.txt"',
 
+        "subscription-always-hwid-enable": "1",
+
+        "x-hwid-active": "true",
+
     }
 
 
@@ -268,7 +310,7 @@ def _build_inactive_headers(subscription, settings: Settings, reason: InactiveRe
 
         headers["sub-info-text"] = _encode_happ_text(_inactive_info_text(reason))
 
-        headers["sub-info-button-text"] = "Продлить"
+        headers["sub-info-button-text"] = _encode_happ_text("Продлить")
 
         if bot:
 
@@ -456,7 +498,7 @@ async def _get_vless_links(subscription, session, settings) -> list[tuple]:
 
         return [
 
-            (credential.client_uuid, _credential_remark(credential))
+            _credential_vless_tuple(credential)
 
             for credential in credentials
 

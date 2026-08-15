@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Админы Telegram{% endblock %}
+{% block content %}
+<h2>👮 Telegram-админы</h2>
+<p class="muted" style="margin-bottom:20px;">
+    Эти аккаунты получают уведомления о каждом платеже в боте.
+    Укажите числовой Telegram ID пользователя (узнать можно через @userinfobot).
+</p>
+
+{% if error %}
+<p class="muted" style="color:#e74c3c;margin-bottom:16px;">⚠️ {{ error }}</p>
+{% endif %}
+{% if success == 'created' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Админ добавлен</p>
+{% elif success == 'deleted' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Админ удалён</p>
+{% endif %}
+
+<section class="card" style="margin-bottom:24px;">
+    <h3>Добавить админа</h3>
+    <form method="post" action="/telegram-admins/create" class="inline-form">
+        <input type="number" name="telegram_id" placeholder="Telegram ID" class="input-sm" required>
+        <input type="text" name="label" placeholder="Имя / заметка (необязательно)" class="input-sm" style="flex:1;">
+        <button type="submit" class="btn-sm btn-success">➕ Добавить</button>
+    </form>
+</section>
+
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Telegram ID</th>
+            <th>Метка</th>
+            <th>Статус</th>
+            <th>Добавлен</th>
+            <th>Действия</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in admins %}
+        <tr>
+            <td>{{ item.id }}</td>
+            <td><code>{{ item.telegram_id }}</code></td>
+            <td>{{ item.label or "—" }}</td>
+            <td>
+                {% if item.is_active %}
+                <span class="badge badge-green">Активен</span>
+                {% else %}
+                <span class="badge badge-red">Выкл</span>
+                {% endif %}
+            </td>
+            <td class="muted">{{ item.created_at }}</td>
+            <td>
+                <div class="inline-form">
+                    <form method="post" action="/telegram-admins/{{ item.id }}/toggle">
+                        <button type="submit" class="btn-sm">
+                            {% if item.is_active %}⏸ Выкл{% else %}▶️ Вкл{% endif %}
+                        </button>
+                    </form>
+                    <form method="post" action="/telegram-admins/{{ item.id }}/delete"
+                          onsubmit="return confirm('Удалить админа {{ item.telegram_id }}?');">
+                        <button type="submit" class="btn-sm btn-danger">🗑 Удалить</button>
+                    </form>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+        {% if not admins %}
+        <tr><td colspan="6" style="text-align:center;color:#8b949e;">Пока никого нет — добавьте Telegram ID</td></tr>
+        {% endif %}
+    </tbody>
+</table>
+{% endblock %}

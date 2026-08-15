@@ -44,6 +44,7 @@ class ConfigCredentialService:
     async def list_server_configs(self, server_id: int) -> list[VpnConfig]:
         result = await self.session.execute(
             select(VpnConfig)
+            .options(selectinload(VpnConfig.server))
             .where(
                 VpnConfig.server_id == server_id,
                 VpnConfig.is_active.is_(True),
@@ -52,12 +53,22 @@ class ConfigCredentialService:
         )
         return list(result.scalars().all())
 
+    async def list_active_configs(self) -> list[VpnConfig]:
+        """Все активные конфиги на активных серверах — для multi-node подписки."""
+        result = await self.session.execute(
+            select(VpnConfig)
+            .join(VpnServer)
+            .options(selectinload(VpnConfig.server))
+            .where(
+                VpnConfig.is_active.is_(True),
+                VpnServer.is_active.is_(True),
+            )
+            .order_by(VpnServer.sort_order, VpnServer.id, VpnConfig.id)
+        )
+        return list(result.scalars().unique().all())
+
     async def ensure_credentials(self, subscription: Subscription) -> list[SubscriptionConfigCredential]:
         from src.services.devices import DeviceService
-
-        server_id = await self.resolve_server_id(subscription)
-        if not server_id:
-            return []
 
         if self.settings:
             device_service = DeviceService(self.session, self.settings)
@@ -67,20 +78,23 @@ class ConfigCredentialService:
         else:
             devices = list(subscription.devices) if subscription.devices else []
 
-        configs = await self.list_server_configs(server_id)
+        configs = await self.list_active_configs()
+        if not configs:
+            # fallback: один сервер подписки
+            server_id = await self.resolve_server_id(subscription)
+            if server_id:
+                configs = await self.list_server_configs(server_id)
         if not configs:
             return []
 
+        # Включаем и отозванные — иначе refresh ломается на unique (subscription, device, config)
         existing_result = await self.session.execute(
             select(SubscriptionConfigCredential)
             .options(
                 selectinload(SubscriptionConfigCredential.device),
                 selectinload(SubscriptionConfigCredential.vpn_config),
             )
-            .where(
-                SubscriptionConfigCredential.subscription_id == subscription.id,
-                SubscriptionConfigCredential.revoked_at.is_(None),
-            )
+            .where(SubscriptionConfigCredential.subscription_id == subscription.id)
         )
         existing = {
             (item.device_id, item.vpn_config_id): item
@@ -88,10 +102,16 @@ class ConfigCredentialService:
         }
 
         created: list[SubscriptionConfigCredential] = []
+        restored: list[SubscriptionConfigCredential] = []
         for device in devices:
             for config in configs:
                 key = (device.id, config.id)
-                if key in existing:
+                current = existing.get(key)
+                if current is not None:
+                    if current.revoked_at is not None:
+                        current.revoked_at = None
+                        current.client_uuid = uuid_std.uuid4()
+                        restored.append(current)
                     continue
                 credential = SubscriptionConfigCredential(
                     subscription_id=subscription.id,
@@ -103,14 +123,17 @@ class ConfigCredentialService:
                 created.append(credential)
                 existing[key] = credential
 
-        if created:
+        if created or restored:
             await self.session.flush()
             logger.info(
-                "Created %s config credentials for subscription %s",
-                len(created),
+                "Credentials for subscription %s: created=%s restored=%s",
                 subscription.id,
+                len(created),
+                len(restored),
             )
-        return list(existing.values())
+
+        # Только активные
+        return [item for item in existing.values() if item.revoked_at is None]
 
     async def list_active(
         self,
@@ -123,7 +146,9 @@ class ConfigCredentialService:
             select(SubscriptionConfigCredential)
             .options(
                 selectinload(SubscriptionConfigCredential.device),
-                selectinload(SubscriptionConfigCredential.vpn_config),
+                selectinload(SubscriptionConfigCredential.vpn_config).selectinload(
+                    VpnConfig.server
+                ),
             )
             .where(
                 SubscriptionConfigCredential.subscription_id == subscription_id,
@@ -180,6 +205,7 @@ class ConfigCredentialService:
         return len(credentials)
 
     async def refresh_subscription(self, subscription: Subscription) -> list[SubscriptionConfigCredential]:
+        """Отзывает текущие UUID и заново активирует credentials (новые UUID)."""
         await self.revoke_subscription(subscription.id)
         return await self.ensure_credentials(subscription)
 

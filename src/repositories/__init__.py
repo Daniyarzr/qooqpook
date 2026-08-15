@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -26,6 +26,22 @@ class UserRepository:
             select(User).where(User.referral_code == code.upper())
         )
         return result.scalar_one_or_none()
+
+    async def get_by_username(self, username: str) -> User | None:
+        clean = username.strip().lstrip("@")
+        if not clean:
+            return None
+        result = await self.session.execute(
+            select(User).where(func.lower(User.username) == clean.lower())
+        )
+        return result.scalar_one_or_none()
+
+    async def list_broadcast_telegram_ids(self) -> list[int]:
+        """Активные (не забаненные) пользователи для рассылки."""
+        result = await self.session.execute(
+            select(User.telegram_id).where(User.is_banned.is_(False)).order_by(User.id)
+        )
+        return list(result.scalars().all())
 
     async def create(
         self,
@@ -238,5 +254,14 @@ class PaymentOrderRepository:
     async def get_by_external_id(self, external_id: str) -> PaymentOrder | None:
         result = await self.session.execute(
             select(PaymentOrder).where(PaymentOrder.external_id == external_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_external_id_for_update(self, external_id: str) -> PaymentOrder | None:
+        """Блокировка строки — защита от двойной обработки webhook + polling."""
+        result = await self.session.execute(
+            select(PaymentOrder)
+            .where(PaymentOrder.external_id == external_id)
+            .with_for_update()
         )
         return result.scalar_one_or_none()

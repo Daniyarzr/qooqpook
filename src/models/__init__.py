@@ -304,6 +304,40 @@ class AdminUser(Base):
     )
 
 
+class TelegramAdmin(Base):
+    """Telegram-аккаунты, которым бот шлёт уведомления (платежи и т.п.)."""
+
+    __tablename__ = "telegram_admins"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    label: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ManualVpnKey(Base):
+    """Отдельные ключи, создаваемые вручную в админке (не привязаны к подписке)."""
+
+    __tablename__ = "manual_vpn_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("vpn_servers.id"), index=True)
+    client_uuid: Mapped[uuid_std.UUID] = mapped_column(
+        UUID(as_uuid=True), unique=True, default=uuid_std.uuid4
+    )
+    label: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    server: Mapped["VpnServer"] = relationship("VpnServer")
+
+
 class PaymentOrder(Base):
     __tablename__ = "payment_orders"
 
