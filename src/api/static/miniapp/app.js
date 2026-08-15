@@ -117,7 +117,7 @@
 
     function subStatus(sub) {
         if (!sub) return { text: "Нет подписки", dot: "" };
-        if (sub.suspended_device_limit) return { text: "Приостановлена", dot: "suspended" };
+        if (sub.suspended_device_limit) return { text: "Лимит устройств", dot: "warning" };
         if (sub.status === "expired" || sub.duration_remaining === "истекла") {
             return { text: "Истекла", dot: "" };
         }
@@ -167,8 +167,7 @@
 
         if (sub?.suspended_device_limit) {
             html += `<div class="alert alert-warning">
-                ⚠️ Превышен лимит устройств (${sub.hwid_count}/${sub.max_devices}).
-                Удалите лишние и восстановите подписку.
+                ⚠️ Устройств: ${sub.hwid_count}/${sub.max_devices}. Первые ${sub.max_devices} работают, лишние — без доступа. Удалите ненужные в разделе «Устройства».
             </div>`;
         }
 
@@ -268,7 +267,7 @@
             <div class="card-title"><span class="hint-icon">📱</span> Устройства (${state.devices.length} / ${sub.max_devices})</div>`;
 
         if (sub.suspended_device_limit) {
-            html += `<div class="alert alert-warning">Подключений: ${sub.hwid_count}</div>`;
+            html += `<div class="alert alert-warning">HWID: ${sub.hwid_count}/${sub.max_devices}. Лишние устройства без доступа — удалите их в боте.</div>`;
         }
 
         if (!state.devices.length) {

@@ -179,6 +179,10 @@ def _build_active_headers(subscription, settings: Settings) -> dict[str, str]:
 
         "sub-info-button-link": bot,
 
+        "subscription-always-hwid-enable": "1",
+
+        "x-hwid-active": "true",
+
         "cache-control": "no-store",
 
     }
@@ -225,9 +229,11 @@ def _inactive_info_text(reason: InactiveReason) -> str:
 
         return (
 
-            "Подписка приостановлена: превышен лимит устройств. "
+            "Лимит устройств: это устройство сверх нормы. "
 
-            "Удалите лишние устройства и восстановите подписку в боте."
+            "Первые устройства продолжают работать. "
+
+            "Удалите лишние в боте → Устройства."
 
         )
 
@@ -258,6 +264,10 @@ def _build_inactive_headers(subscription, settings: Settings, reason: InactiveRe
         "cache-control": "no-store",
 
         "content-disposition": 'attachment; filename="qooq-expired.txt"',
+
+        "subscription-always-hwid-enable": "1",
+
+        "x-hwid-active": "true",
 
     }
 

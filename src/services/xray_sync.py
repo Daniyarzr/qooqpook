@@ -23,9 +23,12 @@ class XrayClient:
     user_id: int
     credential_id: int
     client_uuid: uuid.UUID
+    email_override: str | None = None
 
     @property
     def email(self) -> str:
+        if self.email_override:
+            return self.email_override
         return f"{QOOQ_EMAIL_PREFIX}{self.user_id}-c{self.credential_id}"
 
 

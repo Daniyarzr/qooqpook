@@ -27,7 +27,6 @@ from src.core.enums import PaymentMethod, PaymentStatus, SubscriptionStatus, Sus
 from src.core.utils import build_subscription_url, format_datetime_ru, format_duration_until
 from src.repositories import PlanRepository, UserRepository
 from src.services import SubscriptionService
-from src.services.devices import DeviceService
 from src.services.payment import PaymentService
 from src.services.pricing import PurchasePricingService
 from src.services.promo import PromoCodeService
@@ -86,15 +85,16 @@ async def _resolve_subscription_view(
     sub = await service.get_user_subscription(user.id)
     if sub:
         sub_url = build_subscription_url(settings.hub_domain, sub.subscription_token)
-        device_service = DeviceService(session, settings)
-        devices = await device_service.list_devices(sub.id)
-        if not devices:
-            devices = [await device_service.ensure_default_device(sub)]
+        from src.services.device_limit import DeviceLimitService
+
+        limit_service = DeviceLimitService(session, settings)
+        await limit_service.purge_phantom_hwids(sub.id)
+        device_count = await limit_service.count_hwids(sub.id)
         text = SUBSCRIPTION_ACTIVE.format(
             expires_at=format_datetime_ru(sub.expires_at),
             duration=format_duration_until(sub.expires_at),
             subscription_url=sub_url,
-            device_count=len(devices),
+            device_count=min(device_count, settings.max_devices_per_subscription),
             max_devices=settings.max_devices_per_subscription,
         )
         return text, subscription_menu(True, user.trial_used)
@@ -361,6 +361,21 @@ async def process_purchase_balance(
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_to_menu())
     await callback.answer("✅ Подписка оформлена!")
 
+    from src.services.notifications import notify_telegram_admins
+
+    uname = f"@{user.username}" if user.username else (user.first_name or "—")
+    await notify_telegram_admins(
+        session,
+        settings,
+        (
+            "💳 <b>Новый платёж — подписка (баланс)</b>\n\n"
+            f"👤 {uname}\n"
+            f"🆔 Telegram ID: <code>{user.telegram_id}</code>\n"
+            f"💎 Тариф: <b>{plan.name}</b>\n"
+            f"💰 Сумма: <b>{price} ₽</b>\n"
+            "🏦 Способ: баланс"
+        ),
+    )
 
 @router.callback_query(F.data.startswith("sub:pay:yookassa:"))
 async def process_purchase_yookassa(

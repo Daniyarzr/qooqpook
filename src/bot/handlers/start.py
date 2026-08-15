@@ -13,6 +13,7 @@ from src.bot.helpers.menu import (
 from src.bot.texts.messages import BANNED, REFERRAL_WELCOME, WELCOME, WELCOME_BACK
 from src.core.config import Settings
 from src.repositories import UserRepository
+from src.services.notifications import is_telegram_admin
 from src.services.system_settings import SystemSettingsService
 
 router = Router(name="start")

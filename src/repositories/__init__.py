@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -253,5 +253,14 @@ class PaymentOrderRepository:
     async def get_by_external_id(self, external_id: str) -> PaymentOrder | None:
         result = await self.session.execute(
             select(PaymentOrder).where(PaymentOrder.external_id == external_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_external_id_for_update(self, external_id: str) -> PaymentOrder | None:
+        """Блокировка строки — защита от двойной обработки webhook + polling."""
+        result = await self.session.execute(
+            select(PaymentOrder)
+            .where(PaymentOrder.external_id == external_id)
+            .with_for_update()
         )
         return result.scalar_one_or_none()

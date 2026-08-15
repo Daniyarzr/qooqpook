@@ -6,6 +6,7 @@ import httpx
 from aiogram.types import InlineKeyboardMarkup
 
 from src.core.config import Settings
+from src.models import TelegramAdmin
 
 logger = logging.getLogger(__name__)
 
