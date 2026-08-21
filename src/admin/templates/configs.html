@@ -6,7 +6,7 @@
     <p class="muted">
         Каждый конфиг — отдельный сервер в подписке Happ.
         Для своих шаблонов: <code>{uuid}</code>, <code>{remarks}</code>.
-        Готовый чужой JSON можно вставить как есть — имя конфига станет названием сервера.
+        Готовый чужой JSON вставляйте как есть — адрес берётся из JSON, без привязки к Yandex.
     </p>
 </div>
 
@@ -33,7 +33,7 @@
                 По умолчанию
             </label>
         </div>
-        <textarea name="config_template" rows="12" class="input-sm" style="width:100%;font-family:monospace;font-size:12px;" required placeholder='{"remarks": "{remarks}", ...}'>{% if default_template %}{{ default_template }}{% endif %}</textarea>
+        <textarea name="config_template" rows="12" class="input-sm" style="width:100%;font-family:monospace;font-size:12px;" required placeholder='Вставьте рабочий JSON. Пример: {"remarks": "{remarks}", "outbounds": [{"protocol": "vless", "settings": {"vnext": [{"address": "...", "port": 443, "users": [{"id": "{uuid}"}]}]}}]}'></textarea>
         <div class="inline-form">
             <button type="submit" class="btn-sm btn-success">Добавить</button>
         </div>
@@ -45,7 +45,7 @@
         <tr>
             <th>ID</th>
             <th>Название</th>
-            <th>Сервер</th>
+            <th>Endpoint</th>
             <th>Тип</th>
             <th>Подписок</th>
             <th>По умолчанию</th>
@@ -62,8 +62,8 @@
                 <a href="/configs/{{ config.id }}" class="user-link">{{ config.name }}</a>
             </td>
             <td>
-                {% if config.server %}
-                {{ config.server.country_flag }} {{ config.server.name }}
+                {% if row.endpoint %}
+                <code style="font-size:12px;">{{ row.endpoint }}</code>
                 {% else %}—{% endif %}
             </td>
             <td>

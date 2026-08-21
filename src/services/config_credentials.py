@@ -76,7 +76,9 @@ class ConfigCredentialService:
         )
         return list(result.scalars().unique().all())
 
-    async def ensure_credentials(self, subscription: Subscription) -> list[SubscriptionConfigCredential]:
+    async def ensure_credentials(
+        self, subscription: Subscription
+    ) -> tuple[list[SubscriptionConfigCredential], bool]:
         from src.services.devices import DeviceService
 
         if self.settings:
@@ -89,7 +91,7 @@ class ConfigCredentialService:
 
         configs = await self.list_all_active_configs()
         if not configs:
-            return []
+            return [], False
 
         active_config_ids = {config.id for config in configs}
 
@@ -146,7 +148,8 @@ class ConfigCredentialService:
                 created.append(credential)
                 existing[key] = credential
 
-        if created or restored:
+        changed = bool(created or restored)
+        if changed:
             await self.session.flush()
             logger.info(
                 "Credentials for subscription %s: created=%s restored=%s",
@@ -156,7 +159,7 @@ class ConfigCredentialService:
             )
 
         # Только активные
-        return [item for item in existing.values() if item.revoked_at is None]
+        return [item for item in existing.values() if item.revoked_at is None], changed
 
     async def list_active(
         self,
@@ -232,7 +235,8 @@ class ConfigCredentialService:
     async def refresh_subscription(self, subscription: Subscription) -> list[SubscriptionConfigCredential]:
         """Отзывает текущие UUID и заново активирует credentials (новые UUID)."""
         await self.revoke_subscription(subscription.id)
-        return await self.ensure_credentials(subscription)
+        credentials, _changed = await self.ensure_credentials(subscription)
+        return credentials
 
     async def revoke_device(self, device_id: int) -> int:
         result = await self.session.execute(

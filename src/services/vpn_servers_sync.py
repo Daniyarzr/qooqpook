@@ -9,6 +9,7 @@ from src.models import VpnConfig, VpnServer
 from src.services.vpn_config import (
     FINLAND_CONFIG_NAME,
     LTE_TUNNEL_CONFIG_NAME,
+    LTE_XHTTP_CONFIG_NAME,
     PANEL_TUNNEL_HOST,
     PANEL_TUNNEL_PORT,
     VPN_HOST,
@@ -16,6 +17,7 @@ from src.services.vpn_config import (
     VPN_SNI,
     export_finland_direct_json_template,
     export_lte_tunnel_json_template,
+    export_lte_xhttp_json_template,
 )
 
 
@@ -143,9 +145,23 @@ async def sync_vpn_servers(session) -> list[str]:
             name=LTE_TUNNEL_CONFIG_NAME,
             template=lte_template,
             is_default=True,
-            aliases=("Туннель LTE Обход 🇷🇺", "Xray JSON Profile"),
+            aliases=(
+                "JSON-конфиг",
+                "Основной",
+                "Туннель LTE Обход 🇷🇺",
+                "Xray JSON Profile",
+            ),
         )
         messages.append(f"   ↳ Happ config: {LTE_TUNNEL_CONFIG_NAME}")
+        await _upsert_happ_config(
+            session,
+            server_id=entry_server.id,
+            name=LTE_XHTTP_CONFIG_NAME,
+            template=export_lte_xhttp_json_template(),
+            is_default=False,
+            aliases=("LTE", "🇷🇺 LTE Обход"),
+        )
+        messages.append(f"   ↳ Happ config: {LTE_XHTTP_CONFIG_NAME}")
 
     if panel_server:
         await _upsert_happ_config(
@@ -154,15 +170,29 @@ async def sync_vpn_servers(session) -> list[str]:
             name=FINLAND_CONFIG_NAME,
             template=finland_template,
             is_default=False,
-            aliases=("Финляндия 🇫🇮", "Финляндия Qooq Vpn"),
+            aliases=(
+                "Финляндия QooQ VPN 🇫🇮",
+                "Финляндия (QooQ)",
+                "Финляндия 🇫🇮",
+                "Финляндия Qooq Vpn",
+            ),
         )
         messages.append(f"   ↳ Happ config: {FINLAND_CONFIG_NAME}")
 
-    # Deactivate obsolete demo configs and legacy auto-seeded profiles
+    # Не трогаем пользовательские JSON из админки — только известный legacy-мусор
+    legacy_names = {
+        "Xray JSON Profile",
+        "Туннель LTE Обход 🇷🇺",
+        "Финляндия 🇫🇮",
+        "Финляндия Qooq Vpn",
+        "Германия 🇩🇪",
+        "США 🇺🇸",
+        "Австрия 🇦🇹",
+        "Польша 🇵🇱",
+    }
     result = await session.execute(select(VpnConfig))
-    allowed_names = {LTE_TUNNEL_CONFIG_NAME, FINLAND_CONFIG_NAME}
     for legacy_config in result.scalars().all():
-        if legacy_config.name not in allowed_names:
+        if legacy_config.name in legacy_names:
             legacy_config.is_active = False
             legacy_config.is_default = False
             messages.append(f"   ↳ Deactivated legacy config: {legacy_config.name!r}")

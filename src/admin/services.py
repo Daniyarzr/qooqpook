@@ -647,6 +647,7 @@ class AdminService:
         subscription.expires_at = extend_expiry(subscription.expires_at, days)
         subscription.status = SubscriptionStatus.ACTIVE
         subscription.is_trial = False
+        subscription.expiry_reminder_sent = None
         await self.session.flush()
 
         service = SubscriptionService(self.session, settings)
@@ -849,6 +850,35 @@ class AdminService:
         )
         return result.scalar_one_or_none()
 
+    async def _get_custom_config_server_id(self) -> int | None:
+        """Контейнер для админских JSON — не Yandex Entry.
+
+        Адрес подключения живёт в самом JSON; server_id нужен только как FK.
+        """
+        from src.services.vpn_config import PANEL_TUNNEL_HOST, VPN_HOST
+
+        result = await self.session.execute(
+            select(VpnServer.id)
+            .where(
+                VpnServer.is_active.is_(True),
+                VpnServer.host == PANEL_TUNNEL_HOST,
+            )
+            .limit(1)
+        )
+        sid = result.scalar_one_or_none()
+        if sid:
+            return sid
+        # fallback: любой активный, кроме Yandex entry
+        result = await self.session.execute(
+            select(VpnServer.id)
+            .where(
+                VpnServer.is_active.is_(True),
+                VpnServer.host != VPN_HOST,
+            )
+            .order_by(VpnServer.sort_order, VpnServer.id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none() or await self._get_primary_server_id()
     async def get_server_stats(self, server: VpnServer) -> dict:
         now = utcnow()
         config_ids = [config.id for config in server.configs]
@@ -981,6 +1011,7 @@ class AdminService:
         return server
 
     async def list_configs_with_stats(self) -> list[dict]:
+        from src.services.vpn_config import extract_vless_endpoint
         from src.services.vpn_config_store import VpnConfigStore
 
         store = VpnConfigStore(self.session)
@@ -992,7 +1023,16 @@ class AdminService:
                 .select_from(Subscription)
                 .where(Subscription.config_id == config.id)
             )
-            rows.append({"config": config, "subscriptions_count": subs_count or 0})
+            endpoint = None
+            if config.config_type == VpnConfigType.XRAY_JSON:
+                endpoint = extract_vless_endpoint(config.config_template)
+            rows.append(
+                {
+                    "config": config,
+                    "subscriptions_count": subs_count or 0,
+                    "endpoint": endpoint,
+                }
+            )
         return rows
 
     async def get_config_by_id(self, config_id: int) -> VpnConfig | None:
@@ -1012,7 +1052,8 @@ class AdminService:
         from src.services.vpn_config_store import VpnConfigStore
 
         if server_id is None:
-            server_id = await self._get_primary_server_id()
+            # Не цепляем обычные JSON к Yandex — шаблон уже содержит рабочий endpoint
+            server_id = await self._get_custom_config_server_id()
         if not server_id:
             raise ValueError("Нет активного сервера для привязки конфига")
         server = await self.get_server_by_id(server_id)
@@ -1025,7 +1066,6 @@ class AdminService:
             config_template=config_template,
             is_default=is_default,
         )
-
     async def update_vpn_config(
         self,
         config_id: int,
@@ -1187,3 +1227,149 @@ class AdminService:
         from src.services.system_settings import SystemSettingsService
 
         return await SystemSettingsService(self.session, settings).remove_bot_admin_id(telegram_id)
+
+    # ── Manual VPN keys ──────────────────────────────────────────
+
+    async def list_manual_keys(self, *, active_only: bool = True):
+        from src.models import ManualVpnKey
+
+        stmt = (
+            select(ManualVpnKey)
+            .options(selectinload(ManualVpnKey.server))
+            .order_by(ManualVpnKey.id.desc())
+        )
+        if active_only:
+            stmt = stmt.where(ManualVpnKey.revoked_at.is_(None))
+        result = await self.session.execute(stmt)
+        return list(result.scalars().unique().all())
+
+    async def purge_revoked_manual_keys(self) -> int:
+        from src.models import ManualVpnKey
+
+        result = await self.session.execute(
+            select(ManualVpnKey).where(ManualVpnKey.revoked_at.is_not(None))
+        )
+        rows = list(result.scalars().all())
+        for row in rows:
+            await self.session.delete(row)
+        if rows:
+            await self.session.flush()
+        return len(rows)
+
+    async def create_manual_key(
+        self,
+        server_id: int,
+        label: str | None = None,
+        created_by: str | None = None,
+        expires_at=None,
+        *,
+        sync_now: bool = False,
+        settings: Settings | None = None,
+    ):
+        import logging
+        import uuid as uuid_std
+
+        from src.models import ManualVpnKey
+        from src.services.vpn_config import build_vless_link_for_server, sanitize_remark
+
+        server = await self.session.get(VpnServer, server_id)
+        if not server or not server.is_active:
+            raise ValueError("Сервер не найден или выключен")
+
+        key = ManualVpnKey(
+            server_id=server.id,
+            client_uuid=uuid_std.uuid4(),
+            label=(label or "").strip() or None,
+            created_by=created_by,
+            expires_at=expires_at,
+        )
+        self.session.add(key)
+        await self.session.flush()
+        await self.session.refresh(key)
+
+        sync_ok = True
+        if sync_now and settings:
+            from src.services import SubscriptionService
+
+            try:
+                sync_ok = bool(
+                    await SubscriptionService(self.session, settings).sync_xray_clients()
+                )
+            except Exception:
+                sync_ok = False
+                logging.getLogger(__name__).exception(
+                    "Xray sync failed after creating manual key %s", key.id
+                )
+
+        flag = (server.country_flag or "").strip()
+        remark_source = key.label or (
+            f"{flag} {server.name}".strip() if flag else server.name
+        )
+        remark = sanitize_remark(remark_source)
+        vless = build_vless_link_for_server(
+            key.client_uuid,
+            remark,
+            host=server.host,
+            port=server.port,
+        )
+        return key, vless, sync_ok
+
+    async def delete_manual_key(self, key_id: int) -> bool:
+        """Полностью удаляет ключ из БД (отозванные в списке не держим)."""
+        from src.models import ManualVpnKey
+
+        key = await self.session.get(ManualVpnKey, key_id)
+        if not key:
+            return False
+        await self.session.delete(key)
+        await self.session.flush()
+        return True
+
+    async def revoke_manual_key(self, key_id: int, settings: Settings | None = None) -> bool:
+        """Обратная совместимость: отзыв = удаление."""
+        return await self.delete_manual_key(key_id)
+
+    async def list_telegram_admins(self) -> list:
+        from src.models import TelegramAdmin
+
+        result = await self.session.execute(
+            select(TelegramAdmin).order_by(TelegramAdmin.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def add_telegram_admin(self, telegram_id: int, label: str = "") -> None:
+        from src.models import TelegramAdmin
+
+        existing = await self.session.execute(
+            select(TelegramAdmin).where(TelegramAdmin.telegram_id == telegram_id)
+        )
+        if existing.scalar_one_or_none():
+            raise ValueError("Такой Telegram ID уже добавлен")
+        self.session.add(
+            TelegramAdmin(
+                telegram_id=telegram_id,
+                label=(label or "").strip() or None,
+                is_active=True,
+            )
+        )
+        await self.session.flush()
+
+    async def toggle_telegram_admin(self, admin_id: int) -> bool:
+        from src.models import TelegramAdmin
+
+        admin = await self.session.get(TelegramAdmin, admin_id)
+        if not admin:
+            return False
+        admin.is_active = not admin.is_active
+        await self.session.flush()
+        return True
+
+    async def delete_telegram_admin(self, admin_id: int) -> bool:
+        from src.models import TelegramAdmin
+
+        admin = await self.session.get(TelegramAdmin, admin_id)
+        if not admin:
+            return False
+        await self.session.delete(admin)
+        await self.session.flush()
+        return True

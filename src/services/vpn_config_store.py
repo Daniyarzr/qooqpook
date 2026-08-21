@@ -20,9 +20,8 @@ PLACEHOLDER_REMARKS = "{remarks}"
 
 
 def export_default_json_template() -> str:
-    """Built-in Xray JSON with placeholders for admin seeding."""
+    """Built-in Xray JSON for migrations / server seed (LTE entry)."""
     return export_lte_tunnel_json_template()
-
 
 def validate_json_template(raw: str, *, require_uuid: bool = True) -> dict[str, Any]:
     try:

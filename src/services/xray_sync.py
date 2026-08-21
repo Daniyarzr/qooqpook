@@ -11,7 +11,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.core.config import Settings
-from src.services.vpn_config import FINLAND_CONFIG_NAME, LTE_TUNNEL_CONFIG_NAME
+from src.services.vpn_config import (
+    FINLAND_CONFIG_NAME,
+    FINLAND_NAME_ALIASES,
+    LTE_TUNNEL_CONFIG_NAME,
+    LTE_TUNNEL_NAME_ALIASES,
+    PANEL_TUNNEL_HOST,
+    PANEL_TUNNEL_PORT,
+    VPN_HOST,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -219,36 +227,69 @@ class XraySyncService:
         *,
         inbound_port: int,
     ) -> dict:
-        inbound = self._find_inbound(config, inbound_port)
-        if inbound is None:
+        targets = self._find_sync_inbounds(config, inbound_port)
+        if not targets:
             raise RuntimeError(f"VLESS inbound on port {inbound_port} not found")
 
-        settings = inbound.setdefault("settings", {})
-        existing = settings.get("clients", [])
-        preserved = [
-            client
-            for client in existing
-            if not str(client.get("email", "")).startswith(QOOQ_EMAIL_PREFIX)
-        ]
+        for inbound in targets:
+            settings = inbound.setdefault("settings", {})
+            existing = settings.get("clients", [])
+            preserved = [
+                client
+                for client in existing
+                if not str(client.get("email", "")).startswith(QOOQ_EMAIL_PREFIX)
+            ]
 
-        uses_reality = (
-            inbound.get("streamSettings", {}).get("security") == "reality"
-        )
-        managed = []
-        for item in active_clients:
-            entry = {
-                "id": str(item.client_uuid),
-                "email": item.email,
-                "level": 0,
-            }
-            if uses_reality:
-                entry["flow"] = "xtls-rprx-vision"
-            managed.append(entry)
+            uses_reality = (
+                inbound.get("streamSettings", {}).get("security") == "reality"
+            )
+            managed = []
+            for item in active_clients:
+                entry = {
+                    "id": str(item.client_uuid),
+                    "email": item.email,
+                    "level": 0,
+                }
+                if uses_reality:
+                    entry["flow"] = "xtls-rprx-vision"
+                managed.append(entry)
 
-        settings["clients"] = preserved + managed
-        inbound["settings"] = settings
+            settings["clients"] = preserved + managed
+            inbound["settings"] = settings
+
         self._ensure_stats_policy(config)
         return config
+
+    def _find_sync_inbounds(self, config: dict, inbound_port: int) -> list[dict]:
+        """VLESS TCP (white2) + lte-xhttp backends после nginx SNI mux."""
+        found: list[dict] = []
+        for inbound in config.get("inbounds", []):
+            if inbound.get("protocol") != "vless":
+                continue
+            port = inbound.get("port")
+            tag = inbound.get("tag")
+            network = (inbound.get("streamSettings") or {}).get("network") or "tcp"
+            if tag in {"lte-xhttp", "vless-tcp", "vless-reality"}:
+                found.append(inbound)
+            elif port in {inbound_port, 8443, 10443, 18443, 11443} or network == "xhttp":
+                found.append(inbound)
+        # unique by id(object)
+        uniq: list[dict] = []
+        seen: set[int] = set()
+        for ib in found:
+            i = id(ib)
+            if i not in seen:
+                seen.add(i)
+                uniq.append(ib)
+        return uniq
+
+    def _find_inbound(self, config: dict, inbound_port: int) -> dict | None:
+        for inbound in config.get("inbounds", []):
+            if inbound.get("protocol") != "vless":
+                continue
+            if inbound.get("port") == inbound_port:
+                return inbound
+        return None
 
     def _ensure_stats_policy(self, config: dict) -> None:
         policy = config.setdefault("policy", {})
@@ -260,13 +301,48 @@ class XraySyncService:
         system["statsInboundUplink"] = True
         system["statsInboundDownlink"] = True
 
-    def _find_inbound(self, config: dict, inbound_port: int) -> dict | None:
-        for inbound in config.get("inbounds", []):
-            if inbound.get("protocol") != "vless":
-                continue
-            if inbound.get("port") == inbound_port:
-                return inbound
-        return None
+
+def _config_points_to_panel(config) -> bool:
+    """True if JSON outbound goes direct to panel :10086 (Finland QooQ)."""
+    if not config or not config.config_template:
+        return False
+    try:
+        data = json.loads(config.config_template)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    for outbound in data.get("outbounds") or []:
+        if outbound.get("protocol") != "vless":
+            continue
+        try:
+            vnext = outbound["settings"]["vnext"][0]
+            address = str(vnext.get("address") or "")
+            port = int(vnext.get("port") or 0)
+            if address == PANEL_TUNNEL_HOST and port == PANEL_TUNNEL_PORT:
+                return True
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+    return False
+
+
+def _config_points_to_yandex_entry(config) -> bool:
+    """True if JSON outbound goes to Yandex entry host / LTE SNI."""
+    if not config or not config.config_template:
+        return False
+    try:
+        data = json.loads(config.config_template)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    for outbound in data.get("outbounds") or []:
+        if outbound.get("protocol") != "vless":
+            continue
+        try:
+            vnext = outbound["settings"]["vnext"][0]
+            address = str(vnext.get("address") or "")
+            if address in {VPN_HOST, "white.qooqvpn.ru", "white2.qooqvpn.ru"}:
+                return True
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+    return False
 
 
 def _split_clients_by_config(
@@ -282,13 +358,22 @@ def _split_clients_by_config(
             credential_id=credential.id,
             client_uuid=credential.client_uuid,
         )
-        config_name = credential.vpn_config.name if credential.vpn_config else ""
-        if config_name == FINLAND_CONFIG_NAME:
+        config = credential.vpn_config
+        config_name = config.name if config else ""
+        if (
+            config_name in FINLAND_NAME_ALIASES
+            or _config_points_to_panel(config)
+        ):
             panel_clients.append(client)
-        elif config_name == LTE_TUNNEL_CONFIG_NAME or not config_name:
+        elif (
+            config_name in LTE_TUNNEL_NAME_ALIASES
+            or _config_points_to_yandex_entry(config)
+            or not config_name
+        ):
             tunnel_clients.append(client)
         else:
-            tunnel_clients.append(client)
+            # Чужие JSON (США/Германия/…) на наш Xray не кладём
+            continue
     return tunnel_clients, panel_clients
 
 

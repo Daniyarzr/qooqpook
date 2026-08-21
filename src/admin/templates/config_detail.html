@@ -20,10 +20,10 @@
         <h3>Информация</h3>
         <dl class="info-list">
             <dt>ID</dt><dd>{{ config.id }}</dd>
-            <dt>Сервер</dt>
+            <dt>Endpoint</dt>
             <dd>
-                {% if config.server %}
-                {{ config.server.country_flag }} {{ config.server.name }}
+                {% if endpoint %}
+                <code>{{ endpoint }}</code>
                 {% else %}—{% endif %}
             </dd>
             <dt>Тип</dt><dd>{{ config.config_type.value }}</dd>

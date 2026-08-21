@@ -13,7 +13,6 @@ from src.bot.helpers.menu import (
 from src.bot.texts.messages import BANNED, REFERRAL_WELCOME, WELCOME, WELCOME_BACK
 from src.core.config import Settings
 from src.repositories import UserRepository
-from src.services.notifications import is_telegram_admin
 from src.services.system_settings import SystemSettingsService
 
 router = Router(name="start")
@@ -50,6 +49,10 @@ async def _send_start_menu(
             percent = await SystemSettingsService(session, settings).get_referral_bonus_percent()
             text += REFERRAL_WELCOME.format(bonus_percent=percent)
     else:
+        # Keep profile fields fresh for personalised notifications.
+        user.username = message.from_user.username
+        user.first_name = message.from_user.first_name
+        user.last_name = message.from_user.last_name
         name = user.first_name or user.username or "друг"
         text = WELCOME_BACK.format(name=name)
 

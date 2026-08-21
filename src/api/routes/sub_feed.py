@@ -1,5 +1,5 @@
 import base64
-
+import logging
 from enum import Enum
 
 
@@ -161,7 +161,7 @@ def _build_active_headers(subscription, settings: Settings) -> dict[str, str]:
 
         "subscription-userinfo": _subscription_userinfo(subscription),
 
-        "profile-update-interval": "12",
+        "profile-update-interval": "1",
 
         "profile-title": encode_profile_title_header(),
 
@@ -255,7 +255,7 @@ def _build_inactive_headers(subscription, settings: Settings, reason: InactiveRe
 
         "subscription-userinfo": _subscription_userinfo(subscription),
 
-        "profile-update-interval": "12",
+        "profile-update-interval": "1",
 
         "profile-title": _inactive_profile_title(reason),
 
@@ -453,7 +453,11 @@ async def _get_subscription_share_links(subscription, session, settings) -> list
 
     cred_service = ConfigCredentialService(session, settings)
 
-    await cred_service.ensure_credentials(subscription)
+    _credentials, changed = await cred_service.ensure_credentials(subscription)
+
+    if changed:
+
+        await SubscriptionService(session, settings).sync_xray_clients()
 
     credentials = await cred_service.list_active(subscription.id)
 
@@ -467,21 +471,35 @@ async def _get_subscription_share_links(subscription, session, settings) -> list
 
                 continue
 
-            links.append(
+            try:
 
-                build_credential_share_link(
+                links.append(
 
-                    credential.client_uuid,
+                    build_credential_share_link(
 
-                    credential.vpn_config.config_type.value,
+                        credential.client_uuid,
 
-                    credential.vpn_config.config_template,
+                        credential.vpn_config.config_type.value,
 
-                    _credential_remark(credential),
+                        credential.vpn_config.config_template,
+
+                        _credential_remark(credential),
+
+                    )
 
                 )
 
-            )
+            except ValueError:
+
+                logging.getLogger(__name__).warning(
+
+                    "Skip share link for config_id=%s",
+
+                    credential.vpn_config_id,
+
+                    exc_info=True,
+
+                )
 
         if links:
 
@@ -521,7 +539,11 @@ async def _get_profile_link(
 
     cred_service = ConfigCredentialService(session, settings)
 
-    await cred_service.ensure_credentials(subscription)
+    _credentials, changed = await cred_service.ensure_credentials(subscription)
+
+    if changed:
+
+        await SubscriptionService(session, settings).sync_xray_clients()
 
 
 

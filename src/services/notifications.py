@@ -4,6 +4,8 @@ from typing import Any
 
 import httpx
 from aiogram.types import InlineKeyboardMarkup
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import Settings
 from src.models import TelegramAdmin
@@ -46,6 +48,47 @@ async def send_telegram_message(
         else:
             payload["reply_markup"] = reply_markup
     return await _telegram_api(settings, "sendMessage", payload)
+
+
+async def list_active_telegram_admin_ids(session: AsyncSession) -> list[int]:
+    result = await session.execute(
+        select(TelegramAdmin.telegram_id).where(TelegramAdmin.is_active.is_(True))
+    )
+    return list(result.scalars().all())
+
+
+async def is_telegram_admin(
+    session: AsyncSession, telegram_id: int, settings: Settings
+) -> bool:
+    result = await session.execute(
+        select(TelegramAdmin.id).where(
+            TelegramAdmin.telegram_id == telegram_id,
+            TelegramAdmin.is_active.is_(True),
+        )
+    )
+    if result.scalar_one_or_none() is not None:
+        return True
+    return telegram_id in (settings.admin_telegram_ids or [])
+
+
+async def notify_telegram_admins(
+    session: AsyncSession,
+    settings: Settings,
+    text: str,
+) -> None:
+    """Send message to all active Telegram admins (panel list, else .env fallback)."""
+    admin_ids = await list_active_telegram_admin_ids(session)
+    if not admin_ids and settings.admin_telegram_ids:
+        admin_ids = list(settings.admin_telegram_ids)
+
+    seen: set[int] = set()
+    for telegram_id in admin_ids:
+        if telegram_id in seen:
+            continue
+        seen.add(telegram_id)
+        ok = await send_telegram_message(settings, telegram_id, text)
+        if not ok:
+            logger.warning("Admin notify failed for telegram_id=%s", telegram_id)
 
 
 async def send_broadcast_payload(

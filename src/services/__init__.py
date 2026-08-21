@@ -135,6 +135,7 @@ class SubscriptionService:
             existing.plan_id = plan.id
             existing.suspension_reason = None
             existing.device_limit_notified_at = None
+            existing.expiry_reminder_sent = None
             await self.subscriptions.update(existing)
             subscription = existing
             from src.services.device_limit import DeviceLimitService
@@ -234,9 +235,6 @@ class SubscriptionService:
         if not self.settings.xray_sync_enabled:
             return False
 
-        from src.models import ManualVpnKey
-        from src.core.utils import utcnow
-
         cred_service = ConfigCredentialService(self.session, self.settings)
         credentials = await cred_service.get_all_for_active_subscriptions()
         return await asyncio.to_thread(sync_all_active_clients, self.settings, credentials)
@@ -273,7 +271,7 @@ class SubscriptionService:
             }
 
         from src.core.utils import format_datetime_ru, format_duration_until
-        from src.services.vpn_config import build_vless_link, sanitize_remark
+        from src.services.vpn_config import build_credential_share_link, sanitize_remark
 
         cred_service = ConfigCredentialService(self.session, self.settings)
         await cred_service.ensure_credentials(subscription)
@@ -311,9 +309,26 @@ class SubscriptionService:
                     name = sanitize_remark(
                         credential.device.name if credential.device else "Device"
                     )
-                # Всегда entry-нода (Yandex) — внутренний panel host в клиент не отдаём
-                configs.append(build_vless_link(credential.client_uuid, name))
+                # Адрес из JSON/шаблона — без принудительной подмены на Yandex
+                if credential.vpn_config:
+                    try:
+                        configs.append(
+                            build_credential_share_link(
+                                credential.client_uuid,
+                                credential.vpn_config.config_type.value,
+                                credential.vpn_config.config_template,
+                                name,
+                            )
+                        )
+                    except ValueError:
+                        continue
+                else:
+                    from src.services.vpn_config import build_vless_link
+
+                    configs.append(build_vless_link(credential.client_uuid, name))
         else:
+            from src.services.vpn_config import build_vless_link
+
             devices = list(subscription.devices) if subscription.devices else []
             if devices:
                 for device in devices:

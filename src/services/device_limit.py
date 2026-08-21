@@ -201,34 +201,6 @@ class DeviceLimitService:
             return False
         await self.session.delete(entry)
         await self.session.flush()
-
-        from src.services.config_credentials import ConfigCredentialService
-
-        await ConfigCredentialService(self.session, self.settings).revoke_subscription(
-            subscription.id
-        )
-        await self.session.flush()
-
-        if subscription.device_limit_notified_at:
-            return True
-
-        text = DEVICE_LIMIT_MESSAGE.format(
-            max_devices=self.settings.max_devices_per_subscription,
-            support_username=self.settings.support_username.lstrip("@"),
-        )
-        sent = await send_telegram_message(self.settings, user.telegram_id, text)
-        if sent:
-            subscription.device_limit_notified_at = utcnow()
-            await self.session.flush()
-
-        from src.services import SubscriptionService
-
-        await SubscriptionService(self.session, self.settings).sync_xray_clients()
-        logger.info(
-            "Subscription %s suspended: device limit exceeded for user %s",
-            subscription.id,
-            user.id,
-        )
         return True
 
     async def lift_legacy_device_limit_suspend(self, subscription: Subscription) -> bool:
@@ -305,7 +277,10 @@ class DeviceLimitService:
     async def _notify_overflow_once(self, subscription: Subscription, user: User) -> None:
         if subscription.device_limit_notified_at:
             return
-        text = DEVICE_LIMIT_OVERFLOW_MESSAGE.format(max_devices=self.max_devices)
+        text = DEVICE_LIMIT_OVERFLOW_MESSAGE.format(
+            max_devices=self.max_devices,
+            support_username=(self.settings.support_username or "qooqvpnsupport").lstrip("@"),
+        )
         sent = await send_telegram_message(self.settings, user.telegram_id, text)
         if sent:
             subscription.device_limit_notified_at = utcnow()

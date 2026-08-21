@@ -55,7 +55,9 @@ curl -sf http://127.0.0.1:8001/login >/dev/null || echo "WARN: Admin health fail
 grep -q sync_xray_users.py /etc/cron.d/qooq-vpn 2>/dev/null || cat > /etc/cron.d/qooq-vpn <<'CRON'
 */5 * * * * root cd /opt/qooq-vpn && .venv/bin/python scripts/sync_xray_users.py >> /var/log/qooq-xray-sync.log 2>&1
 */5 * * * * root cd /opt/qooq-vpn && .venv/bin/python scripts/sync_traffic.py >> /var/log/qooq-traffic-sync.log 2>&1
+0 7 * * * root cd /opt/qooq-vpn && .venv/bin/python scripts/notify_subscription_expiry.py >> /var/log/qooq-expiry-reminders.log 2>&1
 CRON
+grep -q notify_subscription_expiry.py /etc/cron.d/qooq-vpn 2>/dev/null || echo '0 7 * * * root cd /opt/qooq-vpn && .venv/bin/python scripts/notify_subscription_expiry.py >> /var/log/qooq-expiry-reminders.log 2>&1' >> /etc/cron.d/qooq-vpn
 """
 
     with sftp.open("/tmp/update.sh", "w") as f:

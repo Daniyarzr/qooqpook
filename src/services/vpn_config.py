@@ -16,6 +16,15 @@ VPN_NETWORK = "tcp"
 PANEL_TUNNEL_HOST = "148.135.184.188"
 PANEL_TUNNEL_PORT = 10086
 
+# LTE-обход (xHTTP) на :443 через SNI white.qooqvpn.ru (nginx ssl_preread).
+# white2.qooqvpn.ru остаётся VLESS TCP для продакшен-клиентов.
+LTE_XHTTP_PORT = 443
+LTE_XHTTP_HOST = "white.qooqvpn.ru"
+LTE_XHTTP_SNI = "white.qooqvpn.ru"
+LTE_XHTTP_PATH = "/static/getFile/video/segment.ts"
+LTE_XHTTP_MODE = "packet-up"
+LTE_XHTTP_CONFIG_NAME = "🇷🇺 LTE"
+
 SUBSCRIPTION_PROFILE_TITLE = "QOOQ VPN 🚀⚡"
 SUBSCRIPTION_BOT_USERNAME = "qooqvpnbot"
 SUBSCRIPTION_REMARK = "QOOQ VPN"
@@ -171,8 +180,29 @@ XRAY_CONFIG_TEMPLATE: dict[str, Any] = {
     "stats": {},
 }
 
-LTE_TUNNEL_CONFIG_NAME = "JSON-конфиг"
-FINLAND_CONFIG_NAME = "Финляндия QooQ VPN 🇫🇮"
+LTE_TUNNEL_CONFIG_NAME = "🇷🇺 Основной"
+FINLAND_CONFIG_NAME = "🇫🇮 Финляндия (QooQ)"
+LTE_TUNNEL_NAME_ALIASES = frozenset(
+    {
+        LTE_TUNNEL_CONFIG_NAME,
+        LTE_XHTTP_CONFIG_NAME,
+        "JSON-конфиг",
+        "Основной",
+        "Туннель LTE Обход 🇷🇺",
+        "Xray JSON Profile",
+        "🇷🇺 LTE",
+        "LTE",
+    }
+)
+FINLAND_NAME_ALIASES = frozenset(
+    {
+        FINLAND_CONFIG_NAME,
+        "Финляндия QooQ VPN 🇫🇮",
+        "Финляндия (QooQ)",
+        "Финляндия 🇫🇮",
+        "Финляндия Qooq Vpn",
+    }
+)
 
 
 def export_lte_tunnel_json_template() -> str:
@@ -180,6 +210,81 @@ def export_lte_tunnel_json_template() -> str:
     config = copy.deepcopy(XRAY_CONFIG_TEMPLATE)
     config["remarks"] = PLACEHOLDER_REMARKS
     config["outbounds"][0]["settings"]["vnext"][0]["users"][0]["id"] = PLACEHOLDER_UUID
+    return json.dumps(config, ensure_ascii=False, indent=2)
+
+
+def export_lte_xhttp_json_template() -> str:
+    """Yandex VLESS+xHTTP+TLS на :443 (SNI white.qooqvpn.ru) — обход LTE РФ."""
+    config = {
+        "remarks": PLACEHOLDER_REMARKS,
+        "log": {"loglevel": "warning"},
+        "dns": {
+            "queryStrategy": "UseIPv4",
+            "servers": ["1.1.1.1", "1.0.0.1"],
+        },
+        "inbounds": [
+            {
+                "listen": "127.0.0.1",
+                "port": 10808,
+                "protocol": "socks",
+                "settings": {"auth": "noauth", "udp": True},
+                "tag": "socks",
+            }
+        ],
+        "outbounds": [
+            {
+                "protocol": "vless",
+                "settings": {
+                    "vnext": [
+                        {
+                            "address": LTE_XHTTP_HOST,
+                            "port": LTE_XHTTP_PORT,
+                            "users": [
+                                {
+                                    "encryption": "none",
+                                    "id": PLACEHOLDER_UUID,
+                                    "flow": "",
+                                }
+                            ],
+                        }
+                    ]
+                },
+                "streamSettings": {
+                    "network": "xhttp",
+                    "security": "tls",
+                    "tlsSettings": {
+                        "alpn": ["h2", "http/1.1"],
+                        "fingerprint": "firefox",
+                        "serverName": LTE_XHTTP_SNI,
+                    },
+                    "xhttpSettings": {
+                        "host": LTE_XHTTP_SNI,
+                        "mode": LTE_XHTTP_MODE,
+                        "path": LTE_XHTTP_PATH,
+                        "extra": {
+                            "noSSEHeader": True,
+                            "scMaxBufferedPosts": 30,
+                            "uplinkHTTPMethod": "GET",
+                            "xmux": {"maxConcurrency": "16-32"},
+                        },
+                    },
+                },
+                "tag": "proxy",
+            },
+            {"protocol": "freedom", "tag": "direct"},
+            {"protocol": "blackhole", "tag": "block"},
+        ],
+        "routing": {
+            "domainStrategy": "IPIfNonMatch",
+            "rules": [
+                {
+                    "type": "field",
+                    "outboundTag": "direct",
+                    "domain": RU_DOMAINS.copy(),
+                }
+            ],
+        },
+    }
     return json.dumps(config, ensure_ascii=False, indent=2)
 
 
@@ -313,15 +418,73 @@ def build_vless_link(
     host: str | None = None,
     port: int | None = None,
     sni: str | None = None,
+    security: str | None = None,
 ) -> str:
-    """VLESS TLS share link — Yandex tunnel entry."""
-    name = encode_vless_fragment(sanitize_remark(remark))
-    params = (
-        f"encryption=none&security=tls&sni={entry_sni}"
-        f"&type={VPN_NETWORK}&headerType=none"
-    )
-    return f"vless://{client_uuid}@{entry_host}:{entry_port}?{params}#{name}"
+    """VLESS share link.
 
+    Без host — legacy LTE entry (Yandex TLS).
+    С host панели / произвольным — берём их как есть (по умолчанию без TLS).
+    """
+    name = encode_vless_fragment(sanitize_remark(remark))
+    if host is None:
+        entry_host = VPN_HOST
+        entry_port = port or VPN_PORT
+        entry_security = security or "tls"
+        entry_sni = sni if sni is not None else VPN_SNI
+    else:
+        entry_host = host
+        entry_port = port if port is not None else PANEL_TUNNEL_PORT
+        entry_security = security or ("tls" if entry_host == VPN_HOST else "none")
+        entry_sni = sni if sni is not None else (VPN_SNI if entry_security == "tls" else "")
+
+    params = [f"encryption=none", f"type={VPN_NETWORK}", "headerType=none"]
+    if entry_security and entry_security != "none":
+        params.append(f"security={entry_security}")
+        if entry_sni:
+            params.append(f"sni={entry_sni}")
+    else:
+        params.append("security=none")
+    return f"vless://{client_uuid}@{entry_host}:{entry_port}?{'&'.join(params)}#{name}"
+
+
+def build_vless_link_for_server(
+    client_uuid: uuid.UUID,
+    remark: str,
+    *,
+    host: str,
+    port: int,
+) -> str:
+    """VLESS for a concrete server row — не подменяет адрес на Yandex."""
+    if host == VPN_HOST:
+        return build_vless_link(client_uuid, remark, host=host, port=port or VPN_PORT)
+    return build_vless_link(
+        client_uuid,
+        remark,
+        host=host,
+        port=port,
+        security="none",
+        sni="",
+    )
+
+
+def extract_vless_endpoint(config_template: str) -> str | None:
+    """address:port из outbound JSON — для UI, без привязки к vpn_servers."""
+    try:
+        data = json.loads(config_template)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    for outbound in data.get("outbounds", []):
+        if outbound.get("protocol") != "vless":
+            continue
+        try:
+            vnext = outbound["settings"]["vnext"][0]
+            address = vnext.get("address")
+            port = vnext.get("port")
+            if address is not None and port is not None:
+                return f"{address}:{port}"
+        except (KeyError, IndexError, TypeError):
+            continue
+    return None
 
 def build_vless_subscription_payload(client_uuid: uuid.UUID, remark: str = DEFAULT_REMARK) -> str:
     """Base64 vless share link for simple Happ import."""
@@ -380,6 +543,17 @@ def xray_config_to_vless_link(config: dict[str, Any], remark: str) -> str | None
             if sni:
                 params.append(f"sni={quote(str(sni), safe='')}")
 
+            fp = (
+                reality_settings.get("fingerprint")
+                or tls_settings.get("fingerprint")
+            )
+            if fp:
+                params.append(f"fp={quote(str(fp), safe='')}")
+
+            alpn = tls_settings.get("alpn") or []
+            if isinstance(alpn, list) and alpn:
+                params.append(f"alpn={quote(','.join(str(x) for x in alpn), safe='')}")
+
             if security == "reality":
                 pbk = reality_settings.get("publicKey")
                 if pbk:
@@ -387,8 +561,8 @@ def xray_config_to_vless_link(config: dict[str, Any], remark: str) -> str | None
                 sid = reality_settings.get("shortId")
                 if sid:
                     params.append(f"sid={quote(str(sid), safe='')}")
-                fp = reality_settings.get("fingerprint") or "chrome"
-                params.append(f"fp={fp}")
+                if not fp:
+                    params.append("fp=chrome")
 
             if network == "ws":
                 ws = stream.get("wsSettings") or {}
@@ -401,6 +575,15 @@ def xray_config_to_vless_link(config: dict[str, Any], remark: str) -> str | None
                 service_name = grpc.get("serviceName") or ""
                 if service_name:
                     params.append(f"serviceName={quote(str(service_name), safe='')}")
+            elif network in ("xhttp", "splithttp"):
+                xhttp = stream.get("xhttpSettings") or stream.get("splithttpSettings") or {}
+                path = (xhttp.get("path") or "/").strip() or "/"
+                host = xhttp.get("host") or sni or address
+                mode = xhttp.get("mode") or ""
+                params.append(f"host={quote(str(host), safe='')}")
+                params.append(f"path={quote(path, safe='')}")
+                if mode:
+                    params.append(f"mode={quote(str(mode), safe='')}")
 
             flow = user.get("flow")
             if flow:
@@ -412,6 +595,54 @@ def xray_config_to_vless_link(config: dict[str, Any], remark: str) -> str | None
         except (KeyError, IndexError, TypeError, ValueError):
             continue
     return None
+
+
+def xray_config_to_hysteria_link(config: dict[str, Any], remark: str) -> str | None:
+    """Build hysteria2:// share link from Xray JSON hysteria outbound."""
+    for outbound in config.get("outbounds", []):
+        protocol = (outbound.get("protocol") or "").lower()
+        if protocol not in ("hysteria", "hysteria2"):
+            continue
+        try:
+            settings = outbound.get("settings") or {}
+            stream = outbound.get("streamSettings") or {}
+            hy = stream.get("hysteriaSettings") or {}
+            tls = stream.get("tlsSettings") or {}
+
+            address = settings.get("address")
+            port = settings.get("port")
+            auth = hy.get("auth") or settings.get("auth") or settings.get("password")
+            if not address or not port or not auth:
+                continue
+
+            params: list[str] = []
+            sni = tls.get("serverName") or address
+            if sni:
+                params.append(f"sni={quote(str(sni), safe='')}")
+            alpn = tls.get("alpn") or []
+            if isinstance(alpn, list) and alpn:
+                params.append(f"alpn={quote(','.join(str(x) for x in alpn), safe='')}")
+            fp = tls.get("fingerprint")
+            if fp:
+                params.append(f"fp={quote(str(fp), safe='')}")
+            if tls.get("allowInsecure"):
+                params.append("insecure=1")
+
+            name = encode_vless_fragment(sanitize_remark(remark))
+            query = "&".join(params)
+            suffix = f"?{query}" if query else ""
+            return f"hysteria2://{quote(str(auth), safe='')}@{address}:{port}{suffix}#{name}"
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+    return None
+
+
+def xray_config_to_share_link(config: dict[str, Any], remark: str) -> str | None:
+    """vless:// or hysteria2:// from full Xray JSON — без подмены на Yandex."""
+    return (
+        xray_config_to_vless_link(config, remark)
+        or xray_config_to_hysteria_link(config, remark)
+    )
 
 
 def build_credential_share_link(
@@ -439,10 +670,11 @@ def build_credential_share_link(
         applied = json.loads(raw)
         applied["remarks"] = safe_remark
 
-    vless = xray_config_to_vless_link(applied, safe_remark)
-    if vless:
-        return vless
-    return build_vless_link(client_uuid, safe_remark)
+    share = xray_config_to_share_link(applied, safe_remark)
+    if share:
+        return share
+    # Шаблон без распознанного outbound — не подменяем на Yandex
+    raise ValueError(f"Не удалось собрать share-ссылку для конфига {safe_remark!r}")
 
 
 EXPIRED_PLACEHOLDER_UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")

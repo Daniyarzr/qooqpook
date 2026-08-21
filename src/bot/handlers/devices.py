@@ -90,6 +90,36 @@ async def show_devices(callback: CallbackQuery, session: AsyncSession, settings:
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("sub:hwid:del:"))
+async def delete_hwid(callback: CallbackQuery, session: AsyncSession, settings: Settings):
+    hwid_id = int(callback.data.split(":")[-1])
+    repo = UserRepository(session)
+    user = await repo.get_by_telegram_id(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала нажмите /start", show_alert=True)
+        return
+
+    sub_service = SubscriptionService(session, settings)
+    subscription = await sub_service.subscriptions.get_current_by_user(user.id)
+    if not subscription:
+        await callback.answer("Нет подписки", show_alert=True)
+        return
+
+    limit_service = DeviceLimitService(session, settings)
+    if not await limit_service.delete_hwid(subscription.id, hwid_id):
+        await callback.answer("Устройство не найдено", show_alert=True)
+        return
+
+    if (
+        subscription.status == SubscriptionStatus.SUSPENDED
+        and subscription.suspension_reason == SuspensionReason.DEVICE_LIMIT.value
+    ):
+        await limit_service.lift_legacy_device_limit_suspend(subscription)
+        await callback.answer("🗑 Удалено · доступ восстановлен")
+    else:
+        await callback.answer("🗑 Устройство удалено")
+    await show_devices(callback, session, settings)
+
 
 @router.callback_query(F.data.startswith("sub:device:del:"))
 async def delete_device(callback: CallbackQuery, session: AsyncSession, settings: Settings):

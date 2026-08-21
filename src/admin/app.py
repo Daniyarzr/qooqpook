@@ -493,13 +493,8 @@ def create_admin_app() -> FastAPI:
         service = AdminService(session)
         config_rows = await service.list_configs_with_stats()
         servers = await service.list_servers()
-        default_template = None
-        try:
-            from src.services.vpn_config_store import export_default_json_template
-
-            default_template = export_default_json_template()
-        except Exception:
-            pass
+        # Не префиллим Yandex LTE — обычный JSON уже рабочий сам по себе
+        default_template = ""
 
         error = request.query_params.get("error")
         success = request.query_params.get("success")
@@ -532,6 +527,12 @@ def create_admin_app() -> FastAPI:
         if not config:
             raise HTTPException(status_code=404, detail="Config not found")
 
+        from src.services.vpn_config import extract_vless_endpoint
+
+        endpoint = None
+        if config.config_type == VpnConfigType.XRAY_JSON:
+            endpoint = extract_vless_endpoint(config.config_template)
+
         subs_count = await session.scalar(
             select(func.count())
             .select_from(Subscription)
@@ -546,6 +547,7 @@ def create_admin_app() -> FastAPI:
             {
                 "admin": admin,
                 "config": config,
+                "endpoint": endpoint,
                 "subscriptions_count": subs_count or 0,
                 "error": error,
                 "success": success,
@@ -881,7 +883,7 @@ def create_admin_app() -> FastAPI:
         await service.purge_revoked_manual_keys()
         keys = await service.list_manual_keys(active_only=True)
         servers = await service.list_servers()
-        from src.services.vpn_config import build_vless_link, sanitize_remark
+        from src.services.vpn_config import build_vless_link_for_server, sanitize_remark
 
         def _is_internal(server) -> bool:
             name = (server.name or "").casefold()
@@ -901,7 +903,17 @@ def create_admin_app() -> FastAPI:
                     else (server.name if server else "Key")
                 )
             )
-            vless = build_vless_link(key.client_uuid, remark)
+            if server:
+                vless = build_vless_link_for_server(
+                    key.client_uuid,
+                    remark,
+                    host=server.host,
+                    port=server.port,
+                )
+            else:
+                from src.services.vpn_config import build_vless_link
+
+                vless = build_vless_link(key.client_uuid, remark)
             key_rows.append({"key": key, "vless": vless, "remark": remark})
             if created_id and str(key.id) == created_id:
                 created_vless = vless
