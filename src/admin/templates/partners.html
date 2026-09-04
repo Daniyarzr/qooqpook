@@ -62,8 +62,7 @@
             <td>
                 <div class="link-row">
                     <a href="{{ row.short_url }}" target="_blank" class="copy-link">{{ row.short_url }}</a>
-                    <button type="button" class="btn-sm btn-info"
-                            onclick="copyText({{ row.short_url|tojson }}, this)">📋 Скопировать</button>
+                    <button type="button" class="btn-sm btn-info" data-copy="{{ row.short_url }}">📋 Скопировать</button>
                 </div>
                 <div class="muted"><code>/p/{{ link.code }}</code></div>
             </td>

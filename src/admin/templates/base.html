@@ -572,31 +572,69 @@
             }, 1600);
         };
 
-        window.copyText = async function (text, btn) {
+        function fallbackCopy(text) {
+            var area = document.createElement("textarea");
+            area.value = text;
+            area.setAttribute("readonly", "");
+            area.style.position = "fixed";
+            area.style.top = "0";
+            area.style.left = "0";
+            area.style.width = "1px";
+            area.style.height = "1px";
+            area.style.opacity = "0";
+            document.body.appendChild(area);
+            area.focus();
+            area.select();
+            area.setSelectionRange(0, area.value.length);
+            var ok = false;
             try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    await navigator.clipboard.writeText(text);
-                } else {
-                    var area = document.createElement("textarea");
-                    area.value = text;
-                    area.setAttribute("readonly", "");
-                    area.style.position = "fixed";
-                    area.style.left = "-9999px";
-                    document.body.appendChild(area);
-                    area.select();
-                    document.execCommand("copy");
-                    document.body.removeChild(area);
-                }
-                if (btn) {
-                    var old = btn.textContent;
-                    btn.textContent = "✓ Скопировано";
-                    setTimeout(function () { btn.textContent = old; }, 1200);
-                }
-                window.showToast("Ссылка скопирована");
-            } catch (err) {
-                window.showToast("Не удалось скопировать");
+                ok = document.execCommand("copy");
+            } catch (e) {
+                ok = false;
             }
+            document.body.removeChild(area);
+            return ok;
+        }
+
+        window.copyText = function (text, btn) {
+            text = (text || "").toString();
+            if (!text) {
+                window.showToast("Нечего копировать");
+                return;
+            }
+
+            function done(ok) {
+                if (ok) {
+                    if (btn) {
+                        var old = btn.getAttribute("data-label") || btn.textContent;
+                        btn.setAttribute("data-label", old);
+                        btn.textContent = "✓ Скопировано";
+                        setTimeout(function () { btn.textContent = old; }, 1200);
+                    }
+                    window.showToast("Ссылка скопирована");
+                } else {
+                    window.prompt("Скопируйте ссылку вручную:", text);
+                    window.showToast("Скопируйте ссылку вручную");
+                }
+            }
+
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(function () {
+                    done(true);
+                }).catch(function () {
+                    done(fallbackCopy(text));
+                });
+                return;
+            }
+            done(fallbackCopy(text));
         };
+
+        document.addEventListener("click", function (e) {
+            var btn = e.target.closest("[data-copy]");
+            if (!btn) return;
+            e.preventDefault();
+            window.copyText(btn.getAttribute("data-copy"), btn);
+        });
     })();
     </script>
 </body>

@@ -21,8 +21,7 @@
             <dd>
                 <div class="link-row">
                     <a href="{{ detail.short_url }}" target="_blank" class="copy-link">{{ detail.short_url }}</a>
-                    <button type="button" class="btn-sm btn-info"
-                            onclick="copyText({{ detail.short_url|tojson }}, this)">📋 Скопировать</button>
+                    <button type="button" class="btn-sm btn-info" data-copy="{{ detail.short_url }}">📋 Скопировать</button>
                 </div>
             </dd>
             <dt>Код</dt>
