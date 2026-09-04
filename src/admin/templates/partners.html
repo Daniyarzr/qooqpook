@@ -30,6 +30,7 @@
     </form>
 </section>
 
+<div class="table-wrap">
 <table>
     <thead>
         <tr>
@@ -59,7 +60,11 @@
                 {% endif %}
             </td>
             <td>
-                <a href="{{ row.short_url }}" target="_blank" class="copy-link">{{ row.short_url }}</a>
+                <div class="link-row">
+                    <a href="{{ row.short_url }}" target="_blank" class="copy-link">{{ row.short_url }}</a>
+                    <button type="button" class="btn-sm btn-info"
+                            onclick="copyText({{ row.short_url|tojson }}, this)">📋 Скопировать</button>
+                </div>
                 <div class="muted"><code>/p/{{ link.code }}</code></div>
             </td>
             <td>{{ stats.clicks }}</td>
@@ -97,4 +102,5 @@
         {% endif %}
     </tbody>
 </table>
+</div>
 {% endblock %}

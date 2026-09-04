@@ -18,7 +18,13 @@
         <h3>Ссылки</h3>
         <dl class="info-list">
             <dt>Короткая</dt>
-            <dd><a href="{{ detail.short_url }}" target="_blank" class="copy-link">{{ detail.short_url }}</a></dd>
+            <dd>
+                <div class="link-row">
+                    <a href="{{ detail.short_url }}" target="_blank" class="copy-link">{{ detail.short_url }}</a>
+                    <button type="button" class="btn-sm btn-info"
+                            onclick="copyText({{ detail.short_url|tojson }}, this)">📋 Скопировать</button>
+                </div>
+            </dd>
             <dt>Код</dt>
             <dd><code>{{ detail.link.code }}</code></dd>
             <dt>В Telegram</dt>
