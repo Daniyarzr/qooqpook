@@ -45,6 +45,7 @@ class UserRepository:
         first_name: str | None = None,
         last_name: str | None = None,
         referred_by_id: int | None = None,
+        partner_link_id: int | None = None,
     ) -> User:
         user = User(
             telegram_id=telegram_id,
@@ -53,6 +54,7 @@ class UserRepository:
             last_name=last_name,
             referral_code=generate_referral_code(),
             referred_by_id=referred_by_id,
+            partner_link_id=partner_link_id,
         )
         self.session.add(user)
         await self.session.flush()

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}{{ detail.link.name }} — партнёр{% endblock %}
+{% block content %}
+<div class="page-header">
+    <a href="/partners" class="back-link">← К партнёрке</a>
+    <h2>🤝 {{ detail.link.name }}</h2>
+</div>
+
+{% if detail.link.telegram_username %}
+<p class="muted">Аккаунт в боте: <strong>@{{ detail.link.telegram_username }}</strong></p>
+{% endif %}
+{% if detail.link.note %}
+<p class="muted">{{ detail.link.note }}</p>
+{% endif %}
+
+<div class="detail-grid" style="margin-top:16px;">
+    <section class="card">
+        <h3>Ссылки</h3>
+        <dl class="info-list">
+            <dt>Короткая</dt>
+            <dd><a href="{{ detail.short_url }}" target="_blank" class="copy-link">{{ detail.short_url }}</a></dd>
+            <dt>Код</dt>
+            <dd><code>{{ detail.link.code }}</code></dd>
+            <dt>В Telegram</dt>
+            <dd><a href="{{ detail.bot_url }}" target="_blank" class="copy-link">{{ detail.bot_url }}</a></dd>
+            <dt>Статус</dt>
+            <dd>
+                {% if detail.link.is_active %}
+                <span class="badge badge-green">Активна</span>
+                {% else %}
+                <span class="badge badge-red">Выключена</span>
+                {% endif %}
+            </dd>
+            <dt>Создана</dt>
+            <dd>{{ detail.link.created_at.strftime('%d.%m.%Y %H:%M') }}</dd>
+        </dl>
+        <div class="action-row" style="margin-top:16px;">
+            <form method="post" action="/partners/{{ detail.link.id }}/toggle">
+                <button type="submit" class="btn btn-warning">
+                    {% if detail.link.is_active %}Выключить{% else %}Включить{% endif %}
+                </button>
+            </form>
+        </div>
+    </section>
+
+    <section class="card">
+        <h3>Статистика</h3>
+        <dl class="info-list">
+            <dt>Клики по ссылке</dt><dd><strong>{{ detail.stats.clicks }}</strong></dd>
+            <dt>Регистраций</dt><dd><strong>{{ detail.stats.registrations }}</strong></dd>
+            <dt>Купили подписку</dt><dd><strong>{{ detail.stats.buyers }}</strong></dd>
+            <dt>Выручка</dt><dd><strong>{{ '%.0f'|format(detail.stats.revenue) }} ₽</strong></dd>
+            <dt>Конверсия клик→рег</dt><dd>{{ detail.stats.conversion_pct }}%</dd>
+        </dl>
+    </section>
+</div>
+
+<section class="card" style="margin-top:24px;">
+    <h3>Приведённые пользователи (последние {{ detail.users|length }})</h3>
+    {% if detail.users %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Telegram</th>
+                    <th>Имя</th>
+                    <th>Регистрация</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in detail.users %}
+                <tr>
+                    <td><a href="/users/{{ user.id }}" class="user-link">{{ user.id }}</a></td>
+                    <td>
+                        {% if user.username %}@{{ user.username }}{% else %}—{% endif %}
+                        <div class="muted">{{ user.telegram_id }}</div>
+                    </td>
+                    <td>{{ user.first_name or '—' }}</td>
+                    <td>{{ user.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="muted">Пока никто не пришёл по этой ссылке.</p>
+    {% endif %}
+</section>
+{% endblock %}

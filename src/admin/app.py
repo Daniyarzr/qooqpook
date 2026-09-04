@@ -728,6 +728,111 @@ def create_admin_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Promo code not found")
         return RedirectResponse("/promo-codes?success=deleted", status_code=302)
 
+    @app.get("/partners", response_class=HTMLResponse)
+    async def partners_page(
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+        settings: Settings = Depends(get_settings),
+    ):
+        admin = get_current_admin(request)
+        if not admin:
+            return RedirectResponse("/login", status_code=302)
+
+        service = AdminService(session)
+        rows = await service.list_partner_rows(settings.hub_domain, settings.bot_username)
+        return templates.TemplateResponse(
+            request,
+            "partners.html",
+            {
+                "admin": admin,
+                "rows": rows,
+                "error": request.query_params.get("error"),
+                "success": request.query_params.get("success"),
+            },
+        )
+
+    @app.get("/partners/{link_id}", response_class=HTMLResponse)
+    async def partner_detail_page(
+        link_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+        settings: Settings = Depends(get_settings),
+    ):
+        admin = get_current_admin(request)
+        if not admin:
+            return RedirectResponse("/login", status_code=302)
+
+        service = AdminService(session)
+        detail = await service.get_partner_detail(
+            link_id, settings.hub_domain, settings.bot_username
+        )
+        if not detail:
+            raise HTTPException(status_code=404, detail="Partner link not found")
+        return templates.TemplateResponse(
+            request,
+            "partner_detail.html",
+            {"admin": admin, "detail": detail},
+        )
+
+    @app.post("/partners/create")
+    async def create_partner_link(
+        request: Request,
+        name: str = Form(...),
+        telegram_username: str = Form(""),
+        note: str = Form(""),
+        code: str = Form(""),
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        try:
+            await service.create_partner_link(
+                name=name,
+                telegram_username=telegram_username or None,
+                note=note or None,
+                code=code.strip() or None,
+            )
+        except ValueError as exc:
+            return RedirectResponse(
+                f"/partners?error={quote(str(exc))}",
+                status_code=302,
+            )
+        return RedirectResponse("/partners?success=created", status_code=302)
+
+    @app.post("/partners/{link_id}/toggle")
+    async def toggle_partner_link(
+        link_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        if not await service.toggle_partner_link(link_id):
+            raise HTTPException(status_code=404, detail="Partner link not found")
+        referer = request.headers.get("referer") or ""
+        if f"/partners/{link_id}" in referer:
+            return RedirectResponse(f"/partners/{link_id}", status_code=302)
+        return RedirectResponse("/partners", status_code=302)
+
+    @app.post("/partners/{link_id}/delete")
+    async def delete_partner_link(
+        link_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        try:
+            ok = await service.delete_partner_link(link_id)
+        except ValueError as exc:
+            return RedirectResponse(f"/partners?error={quote(str(exc))}", status_code=302)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Partner link not found")
+        return RedirectResponse("/partners?success=deleted", status_code=302)
+
     @app.get("/settings", response_class=HTMLResponse)
     async def settings_page(
         request: Request,

@@ -33,6 +33,21 @@ def build_referral_link(bot_username: str, telegram_id: int) -> str:
     return f"https://t.me/{username}?start=ref_{telegram_id}"
 
 
+def generate_partner_code(length: int = 6) -> str:
+    """Short readable partner codes (no ambiguous chars)."""
+    alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def build_partner_short_url(hub_domain: str, code: str) -> str:
+    return f"https://{hub_domain}/p/{code}"
+
+
+def build_partner_bot_start(bot_username: str, code: str) -> str:
+    username = bot_username.lstrip("@")
+    return f"https://t.me/{username}?start=p_{code}"
+
+
 def build_telegram_link(username: str) -> str:
     return f"https://t.me/{username.lstrip('@')}"
 

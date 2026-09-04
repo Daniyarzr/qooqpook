@@ -63,11 +63,18 @@ async def get_or_create_miniapp_user(
         return user, False
 
     referred_by_id = None
+    partner_link_id = None
     start_param = auth.start_param or ""
     if start_param.startswith("ref_"):
         referrer = await repo.resolve_referrer(start_param)
         if referrer and referrer.telegram_id != auth.user.id:
             referred_by_id = referrer.id
+    elif start_param.startswith("p_"):
+        from src.services.partners import PartnerService
+
+        partner = await PartnerService(session).get_by_code(start_param[2:], active_only=True)
+        if partner:
+            partner_link_id = partner.id
 
     user = await repo.create(
         telegram_id=auth.user.id,
@@ -75,5 +82,6 @@ async def get_or_create_miniapp_user(
         first_name=auth.user.first_name,
         last_name=auth.user.last_name,
         referred_by_id=referred_by_id,
+        partner_link_id=partner_link_id,
     )
-    return user, bool(referred_by_id)
+    return user, bool(referred_by_id or partner_link_id)

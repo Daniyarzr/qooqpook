@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from src.api.routes import health, hub, miniapp, miniapp_api, payments, sub_feed, subscription
+from src.api.routes import health, hub, miniapp, miniapp_api, partner, payments, sub_feed, subscription
 from src.core.config import get_settings
 
 _STATIC_MINIAPP = Path(__file__).resolve().parent / "static" / "miniapp"
@@ -39,6 +39,7 @@ def create_api_app() -> FastAPI:
     )
 
     app.include_router(sub_feed.router, tags=["subscription-feed"])
+    app.include_router(partner.router, tags=["partners"])
     app.include_router(health.router, tags=["health"])
     app.include_router(miniapp.router, tags=["miniapp"])
     app.include_router(miniapp_api.router, tags=["miniapp-api"])

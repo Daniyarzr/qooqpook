@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Партнёрка{% endblock %}
+{% block content %}
+<h2>🤝 Партнёрская программа</h2>
+<p class="muted" style="margin-bottom:20px;">
+    Короткие ссылки для партнёров. Клиент переходит по ссылке → бот → регистрация привязывается к партнёру.
+</p>
+
+{% if error %}
+<p class="muted" style="color:#e74c3c;margin-bottom:16px;">⚠️ {{ error }}</p>
+{% endif %}
+{% if success == 'created' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Ссылка создана</p>
+{% elif success == 'deleted' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Ссылка удалена</p>
+{% endif %}
+
+<section class="card" style="margin-bottom:24px;">
+    <h3>Создать партнёрскую ссылку</h3>
+    <form method="post" action="/partners/create" class="inline-form" style="flex-direction:column;align-items:stretch;">
+        <div class="inline-form">
+            <input type="text" name="name" placeholder="Имя партнёра / кампании" class="input-sm" required maxlength="128" style="flex:1;">
+            <input type="text" name="telegram_username" placeholder="@username в боте (необязательно)" class="input-sm" maxlength="255">
+        </div>
+        <div class="inline-form">
+            <input type="text" name="code" placeholder="Короткий код (пусто = авто, напр. ivan)" class="input-sm" maxlength="16" pattern="[A-Za-z0-9]{3,16}">
+            <input type="text" name="note" placeholder="Заметка (необязательно)" class="input-sm" style="flex:1;" maxlength="512">
+            <button type="submit" class="btn-sm btn-success">➕ Создать</button>
+        </div>
+    </form>
+</section>
+
+<table>
+    <thead>
+        <tr>
+            <th>Партнёр</th>
+            <th>Ссылка</th>
+            <th>Клики</th>
+            <th>Пришло</th>
+            <th>Купили</th>
+            <th>Выручка</th>
+            <th>Конверсия</th>
+            <th>Статус</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        {% set link = row.link %}
+        {% set stats = row.stats %}
+        <tr>
+            <td>
+                <a href="/partners/{{ link.id }}" class="user-link"><strong>{{ link.name }}</strong></a>
+                {% if link.telegram_username %}
+                <div class="muted">@{{ link.telegram_username }}</div>
+                {% endif %}
+                {% if link.note %}
+                <div class="muted">{{ link.note }}</div>
+                {% endif %}
+            </td>
+            <td>
+                <a href="{{ row.short_url }}" target="_blank" class="copy-link">{{ row.short_url }}</a>
+                <div class="muted"><code>/p/{{ link.code }}</code></div>
+            </td>
+            <td>{{ stats.clicks }}</td>
+            <td>{{ stats.registrations }}</td>
+            <td>{{ stats.buyers }}</td>
+            <td>{{ '%.0f'|format(stats.revenue) }} ₽</td>
+            <td>{{ stats.conversion_pct }}%</td>
+            <td>
+                {% if link.is_active %}
+                <span class="badge badge-green">Активна</span>
+                {% else %}
+                <span class="badge badge-red">Выкл</span>
+                {% endif %}
+            </td>
+            <td>
+                <div class="actions">
+                    <a href="/partners/{{ link.id }}" class="btn-sm btn-success" style="text-decoration:none;">Открыть</a>
+                    <form method="post" action="/partners/{{ link.id }}/toggle">
+                        <button type="submit" class="btn-sm btn-warning">
+                            {% if link.is_active %}Выкл{% else %}Вкл{% endif %}
+                        </button>
+                    </form>
+                    {% if stats.registrations == 0 %}
+                    <form method="post" action="/partners/{{ link.id }}/delete"
+                          onsubmit="return confirm('Удалить ссылку {{ link.code }}?');">
+                        <button type="submit" class="btn-sm btn-danger">Удалить</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+        {% if not rows %}
+        <tr><td colspan="9" style="text-align:center;color:#8b949e;">Партнёрских ссылок пока нет</td></tr>
+        {% endif %}
+    </tbody>
+</table>
+{% endblock %}

@@ -49,6 +49,11 @@ class User(Base):
     )
     referral_code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     referred_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    partner_link_id: Mapped[int | None] = mapped_column(
+        ForeignKey("partner_links.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     referral_discount_used: Mapped[bool] = mapped_column(Boolean, default=False)
     balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -72,6 +77,29 @@ class User(Base):
     payment_orders: Mapped[list["PaymentOrder"]] = relationship(
         "PaymentOrder", back_populates="user", cascade="all, delete-orphan"
     )
+    partner_link: Mapped["PartnerLink | None"] = relationship(
+        "PartnerLink", back_populates="users"
+    )
+
+
+class PartnerLink(Base):
+    """Admin-created partner acquisition link (separate from user referrals)."""
+
+    __tablename__ = "partner_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    telegram_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    click_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    users: Mapped[list["User"]] = relationship("User", back_populates="partner_link")
 
 
 class VpnServer(Base):

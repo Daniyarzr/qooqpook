@@ -1383,3 +1383,64 @@ class AdminService:
         await self.session.delete(admin)
         await self.session.flush()
         return True
+
+    async def list_partner_rows(self, hub_domain: str, bot_username: str) -> list[dict]:
+        from src.core.utils import build_partner_bot_start, build_partner_short_url
+        from src.services.partners import PartnerService
+
+        service = PartnerService(self.session)
+        rows = []
+        for item in await service.list_with_stats():
+            link = item["link"]
+            rows.append(
+                {
+                    "link": link,
+                    "stats": item["stats"],
+                    "short_url": build_partner_short_url(hub_domain, link.code),
+                    "bot_url": build_partner_bot_start(bot_username or "qooqvpnbot", link.code),
+                }
+            )
+        return rows
+
+    async def create_partner_link(
+        self,
+        *,
+        name: str,
+        telegram_username: str | None = None,
+        note: str | None = None,
+        code: str | None = None,
+    ):
+        from src.services.partners import PartnerService
+
+        return await PartnerService(self.session).create_link(
+            name=name,
+            telegram_username=telegram_username,
+            note=note,
+            code=code or None,
+        )
+
+    async def toggle_partner_link(self, link_id: int):
+        from src.services.partners import PartnerService
+
+        return await PartnerService(self.session).toggle_active(link_id)
+
+    async def delete_partner_link(self, link_id: int) -> bool:
+        from src.services.partners import PartnerService
+
+        return await PartnerService(self.session).delete_link(link_id)
+
+    async def get_partner_detail(self, link_id: int, hub_domain: str, bot_username: str) -> dict | None:
+        from src.core.utils import build_partner_bot_start, build_partner_short_url
+        from src.services.partners import PartnerService
+
+        service = PartnerService(self.session)
+        link = await service.get_by_id(link_id)
+        if not link:
+            return None
+        return {
+            "link": link,
+            "stats": await service.stats_for(link_id),
+            "users": await service.list_users(link_id),
+            "short_url": build_partner_short_url(hub_domain, link.code),
+            "bot_url": build_partner_bot_start(bot_username or "qooqvpnbot", link.code),
+        }

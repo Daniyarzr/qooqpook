@@ -8,6 +8,7 @@ from src.db.base import Base
 from src.models import (  # noqa: F401 — register models
     AdminUser,
     ManualVpnKey,
+    PartnerLink,
     PaymentOrder,
     PromoCode,
     PromoCodeRedemption,

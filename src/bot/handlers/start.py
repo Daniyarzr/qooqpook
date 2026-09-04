@@ -24,12 +24,14 @@ async def _send_start_menu(
     settings: Settings,
     *,
     referral_code: str | None = None,
+    partner_code: str | None = None,
 ) -> None:
     repo = UserRepository(session)
     user = await repo.get_by_telegram_id(message.from_user.id)
 
     if not user:
         referred_by_id = None
+        partner_link_id = None
         if referral_code:
             referrer = await repo.resolve_referrer(
                 referral_code if referral_code.startswith("ref_") else f"ref_{referral_code}"
@@ -37,12 +39,20 @@ async def _send_start_menu(
             if referrer and referrer.telegram_id != message.from_user.id:
                 referred_by_id = referrer.id
 
+        if partner_code:
+            from src.services.partners import PartnerService
+
+            partner = await PartnerService(session).get_by_code(partner_code, active_only=True)
+            if partner:
+                partner_link_id = partner.id
+
         user = await repo.create(
             telegram_id=message.from_user.id,
             username=message.from_user.username,
             first_name=message.from_user.first_name,
             last_name=message.from_user.last_name,
             referred_by_id=referred_by_id,
+            partner_link_id=partner_link_id,
         )
         text = WELCOME
         if referred_by_id:
@@ -81,12 +91,21 @@ async def cmd_start(
     await state.clear()
 
     referral_code = None
+    partner_code = None
     if message.text and " " in message.text:
         args = message.text.split(maxsplit=1)[1]
         if args.startswith("ref_"):
             referral_code = args[4:]
+        elif args.startswith("p_"):
+            partner_code = args[2:]
 
-    await _send_start_menu(message, session, settings, referral_code=referral_code)
+    await _send_start_menu(
+        message,
+        session,
+        settings,
+        referral_code=referral_code,
+        partner_code=partner_code,
+    )
 
 
 @router.message(F.text.func(is_main_menu_keyboard_text), StateFilter("*"))
