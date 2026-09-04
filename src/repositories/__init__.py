@@ -2,7 +2,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.core.enums import SubscriptionStatus
+from src.core.enums import PaymentStatus, SubscriptionStatus
 from src.core.utils import generate_referral_code, utcnow
 from src.models import PaymentOrder, Subscription, SubscriptionPlan, Transaction, User, VpnServer
 
@@ -145,6 +145,24 @@ class SubscriptionRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_latest_expired_by_user(self, user_id: int) -> Subscription | None:
+        """Most recent expired subscription — for renewal keeping the same link."""
+        result = await self.session.execute(
+            select(Subscription)
+            .where(Subscription.user_id == user_id)
+            .where(Subscription.status == SubscriptionStatus.EXPIRED)
+            .order_by(Subscription.expires_at.desc(), Subscription.id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_renewable_by_user(self, user_id: int) -> Subscription | None:
+        """Subscription that can be extended/renewed (including expired)."""
+        existing = await self.get_manageable_by_user(user_id)
+        if existing:
+            return existing
+        return await self.get_latest_expired_by_user(user_id)
+
     async def get_current_by_user(self, user_id: int) -> Subscription | None:
         """Latest subscription including suspended (for bot UI)."""
         result = await self.session.execute(
@@ -264,3 +282,12 @@ class PaymentOrderRepository:
             .with_for_update()
         )
         return result.scalar_one_or_none()
+
+    async def list_pending(self, *, limit: int = 50) -> list[PaymentOrder]:
+        result = await self.session.execute(
+            select(PaymentOrder)
+            .where(PaymentOrder.status == PaymentStatus.PENDING)
+            .order_by(PaymentOrder.id.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())

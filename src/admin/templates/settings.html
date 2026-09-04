@@ -7,12 +7,36 @@
 <p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Админ бота добавлен</p>
 {% elif success == 'admin_removed' %}
 <p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Админ бота удалён</p>
+{% elif success == 'guide_saved' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Текст инструкции сохранён</p>
 {% elif success %}
 <p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Настройки сохранены</p>
 {% endif %}
 {% if error %}
 <p class="muted" style="color:#e74c3c;margin-bottom:16px;">⚠️ {{ error }}</p>
 {% endif %}
+
+<section class="card" style="max-width:720px;margin-bottom:24px;">
+    <h3>📲 Как подключить VPN в приложение</h3>
+    <p class="muted" style="margin-bottom:16px;">
+        Текст показывается в боте по кнопке «Как подключить VPN в приложение».
+        Поддерживается HTML Telegram (<code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;a href=""&gt;</code>).
+        Плейсхолдер <code>{support_username}</code> подставит юзернейм поддержки из .env.
+    </p>
+    <form method="post" action="/settings/connect-guide">
+        <label for="connect_guide_text">Текст инструкции</label>
+        <textarea
+            id="connect_guide_text"
+            name="connect_guide_text"
+            rows="16"
+            class="input-sm"
+            style="width:100%;max-width:100%;font-family:ui-monospace,monospace;font-size:13px;line-height:1.45;margin-top:8px;"
+            required
+        >{{ connect_guide_text }}</textarea>
+        <p class="muted" style="margin-top:8px;">Макс. 3500 символов</p>
+        <button type="submit" class="btn-sm btn-success" style="margin-top:12px;">Сохранить</button>
+    </form>
+</section>
 
 <section class="card" style="max-width:560px;margin-bottom:24px;">
     <h3>🎁 Реферальная программа</h3>

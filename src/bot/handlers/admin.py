@@ -7,9 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.bot.helpers.menu import is_bot_admin
 from src.bot.keyboards.inline import (
+    admin_broadcast_confirm_keyboard,
     admin_list_keyboard,
     admin_panel_keyboard,
-    broadcast_confirm_keyboard,
     to_main_menu_keyboard,
 )
 from src.bot.states import AdminBroadcastStates, AdminManageStates
@@ -206,6 +206,7 @@ async def admin_broadcast_photo(
         photo_file_id=photo_file_id,
         caption=caption,
     )
+    await state.set_state(AdminBroadcastStates.confirm)
 
     if scope == "one" and target_id:
         preview = f"Подтвердить отправку пользователю <code>{target_id}</code>?"
@@ -217,7 +218,7 @@ async def admin_broadcast_photo(
     await message.answer(
         preview,
         parse_mode="HTML",
-        reply_markup=broadcast_confirm_keyboard(scope),
+        reply_markup=admin_broadcast_confirm_keyboard(scope),
     )
 
 
@@ -242,6 +243,7 @@ async def admin_broadcast_text(
     target_id = data.get("target_id")
 
     await state.update_data(kind="text", text=text)
+    await state.set_state(AdminBroadcastStates.confirm)
 
     if scope == "one" and target_id:
         preview = f"Подтвердить отправку пользователю <code>{target_id}</code>?"
@@ -253,11 +255,11 @@ async def admin_broadcast_text(
     await message.answer(
         preview,
         parse_mode="HTML",
-        reply_markup=broadcast_confirm_keyboard(scope),
+        reply_markup=admin_broadcast_confirm_keyboard(scope),
     )
 
 
-@router.callback_query(F.data.startswith("admin:broadcast:no:"))
+@router.callback_query(F.data.startswith("admin:broadcast:no:"), AdminBroadcastStates.confirm)
 async def admin_broadcast_cancel(callback: CallbackQuery, state: FSMContext, settings: Settings, session: AsyncSession):
     if await _deny(callback, settings, session):
         return
@@ -266,7 +268,7 @@ async def admin_broadcast_cancel(callback: CallbackQuery, state: FSMContext, set
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("admin:broadcast:yes:"))
+@router.callback_query(F.data.startswith("admin:broadcast:yes:"), AdminBroadcastStates.confirm)
 async def admin_broadcast_confirm(
     callback: CallbackQuery,
     state: FSMContext,
@@ -285,6 +287,14 @@ async def admin_broadcast_confirm(
         "photo_file_id": data.get("photo_file_id"),
         "caption": data.get("caption") or "",
     }
+    # Не отправляем «зависшие» подтверждения без контента (после рестарта FSM пустой).
+    has_content = bool(payload.get("photo_file_id")) or bool((payload.get("text") or "").strip())
+    if not has_content:
+        await state.clear()
+        await callback.message.edit_text("Нет сообщения для рассылки. Начните заново.")
+        await callback.answer()
+        return
+
     footer = to_main_menu_keyboard(settings)
     await state.clear()
     await callback.answer("Отправляю...")

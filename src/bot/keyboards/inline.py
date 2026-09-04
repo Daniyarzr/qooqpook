@@ -19,6 +19,12 @@ def main_menu(settings: Settings, *, is_admin: bool = False) -> InlineKeyboardMa
         ],
         [
             InlineKeyboardButton(
+                text="📲 Как подключить VPN в приложение",
+                callback_data="connect:guide",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
                 text="🌐 Mini App",
                 web_app=WebAppInfo(url=settings.webapp_url),
             ),
@@ -72,7 +78,7 @@ def admin_list_keyboard(admin_ids: list[int], root_ids: set[int]) -> InlineKeybo
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def broadcast_confirm_keyboard(scope: str) -> InlineKeyboardMarkup:
+def admin_broadcast_confirm_keyboard(scope: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -117,6 +123,8 @@ def subscription_menu(
     has_subscription: bool,
     trial_used: bool,
     suspended_device_limit: bool = False,
+    *,
+    expired: bool = False,
 ) -> InlineKeyboardMarkup:
     buttons = []
     if suspended_device_limit:
@@ -125,6 +133,10 @@ def subscription_menu(
         )
         buttons.append(
             [InlineKeyboardButton(text="✅ Восстановить подписку", callback_data="sub:restore")]
+        )
+    elif expired:
+        buttons.append(
+            [InlineKeyboardButton(text="🔄 Продлить подписку", callback_data="sub:plans")]
         )
     elif not has_subscription and not trial_used:
         buttons.append(
@@ -260,6 +272,26 @@ def confirm_purchase(
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def promo_error_keyboard(plan_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔄 Попробовать ещё раз",
+                    callback_data=f"sub:promo:retry:{plan_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🎟 Новый промокод",
+                    callback_data=f"sub:promo:{plan_id}",
+                )
+            ],
+            [InlineKeyboardButton(text="◀️ Назад к тарифам", callback_data="sub:plans")],
+        ]
+    )
 
 
 def balance_menu(topup_enabled: bool = False) -> InlineKeyboardMarkup:

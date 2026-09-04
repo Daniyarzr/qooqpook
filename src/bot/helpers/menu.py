@@ -46,7 +46,7 @@ async def send_main_menu(
     await message.answer(
         text,
         parse_mode="HTML",
-        reply_markup=main_reply_keyboard(),
+        reply_markup=main_reply_keyboard(is_admin=is_admin),
     )
     await message.answer(
         "Выберите действие 👇",

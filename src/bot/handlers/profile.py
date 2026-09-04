@@ -183,3 +183,12 @@ async def show_help(callback: CallbackQuery, settings: Settings):
     text = HELP.format(support_username=settings.support_username.lstrip("@"))
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_to_menu())
     await callback.answer()
+
+
+@router.callback_query(F.data == "connect:guide")
+async def show_connect_guide(
+    callback: CallbackQuery, session: AsyncSession, settings: Settings
+):
+    text = await SystemSettingsService(session, settings).get_connect_guide_text()
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_to_menu())
+    await callback.answer()

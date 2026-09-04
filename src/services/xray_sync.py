@@ -12,6 +12,8 @@ from pathlib import Path
 
 from src.core.config import Settings
 from src.services.vpn_config import (
+    EXPIRED_ANNOUNCE_EMAIL,
+    EXPIRED_ANNOUNCE_UUID,
     FINLAND_CONFIG_NAME,
     FINLAND_NAME_ALIASES,
     LTE_TUNNEL_CONFIG_NAME,
@@ -148,7 +150,9 @@ class XraySyncService:
             "hostname": ssh_host,
             "port": ssh_port,
             "username": ssh_user,
-            "timeout": 20,
+            "timeout": 8,
+            "banner_timeout": 8,
+            "auth_timeout": 8,
             "look_for_keys": False,
             "allow_agent": False,
         }
@@ -377,12 +381,26 @@ def _split_clients_by_config(
     return tunnel_clients, panel_clients
 
 
+def _announce_client() -> XrayClient:
+    """Shared UUID for expired users (Telegram-only via Happ routing)."""
+    return XrayClient(
+        user_id=0,
+        credential_id=0,
+        client_uuid=EXPIRED_ANNOUNCE_UUID,
+        email_override=EXPIRED_ANNOUNCE_EMAIL,
+    )
+
+
 def sync_active_clients(settings: Settings, active_clients: list[XrayClient]) -> bool:
     return XraySyncService(settings).sync_clients(active_clients)
 
 
 def sync_all_active_clients(settings: Settings, credentials) -> bool:
     tunnel_clients, panel_clients = _split_clients_by_config(credentials)
+    announce = _announce_client()
+    # Always keep announce UUID on both managed nodes.
+    tunnel_clients = [*tunnel_clients, announce]
+    panel_clients = [*panel_clients, announce]
     service = XraySyncService(settings)
     yandex_ok = service.sync_clients(tunnel_clients)
     panel_ok = service.sync_panel_clients(panel_clients)

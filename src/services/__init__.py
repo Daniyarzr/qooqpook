@@ -40,7 +40,7 @@ class SubscriptionService:
     async def get_user_subscription(self, user_id: int) -> Subscription | None:
         return await self.subscriptions.get_active_by_user(user_id)
 
-    async def activate_trial(self, user_id: int) -> Subscription:
+    async def activate_trial(self, user_id: int, *, sync_xray: bool = False) -> Subscription:
         user = await self.users.get_by_id(user_id)
         if not user:
             raise ValueError("User not found")
@@ -62,7 +62,8 @@ class SubscriptionService:
         device_service = DeviceService(self.session, self.settings)
         await device_service.ensure_default_device(subscription)
         await ConfigCredentialService(self.session, self.settings).ensure_credentials(subscription)
-        await self.sync_xray_clients()
+        if sync_xray:
+            await self.sync_xray_clients()
         return subscription
 
     async def extend_subscription(
@@ -122,12 +123,11 @@ class SubscriptionService:
                 )
             )
 
-        existing = await self.subscriptions.get_manageable_by_user(user_id)
+        existing = await self.subscriptions.get_renewable_by_user(user_id)
         now = utcnow()
-        if existing and existing.expires_at <= now and existing.status != SubscriptionStatus.SUSPENDED:
-            existing = None
 
         if existing:
+            # Active → add days to current expiry; expired → start from now, keep same token/link.
             base = existing.expires_at if existing.expires_at > now else now
             existing.expires_at = extend_expiry(base, plan.days)
             existing.status = SubscriptionStatus.ACTIVE
@@ -143,6 +143,11 @@ class SubscriptionService:
             await DeviceLimitService(self.session, self.settings).purge_phantom_hwids(
                 subscription.id
             )
+            # Expired subs may have no devices after cleanup — ensure at least one.
+            device_service = DeviceService(self.session, self.settings)
+            devices = await device_service.list_devices(subscription.id)
+            if not devices:
+                await device_service.ensure_default_device(subscription)
         else:
             subscription = Subscription(
                 user_id=user_id,
@@ -205,21 +210,17 @@ class SubscriptionService:
         await self.sync_xray_clients()
         return subscription
 
-    async def expire_subscription(self, subscription: Subscription) -> None:
-        if subscription.status == SubscriptionStatus.EXPIRED:
-            await ConfigCredentialService(self.session, self.settings).revoke_subscription(
-                subscription.id
-            )
-            await self.session.flush()
-            await self.sync_xray_clients()
-            return
-
-        subscription.status = SubscriptionStatus.EXPIRED
+    async def expire_subscription(
+        self, subscription: Subscription, *, sync_xray: bool = True
+    ) -> None:
+        if subscription.status != SubscriptionStatus.EXPIRED:
+            subscription.status = SubscriptionStatus.EXPIRED
         await ConfigCredentialService(self.session, self.settings).revoke_subscription(
             subscription.id
         )
         await self.session.flush()
-        await self.sync_xray_clients()
+        if sync_xray:
+            await self.sync_xray_clients()
 
     async def suspend_expired(self) -> int:
         expired = await self.subscriptions.get_expired_active()
@@ -235,9 +236,13 @@ class SubscriptionService:
         if not self.settings.xray_sync_enabled:
             return False
 
-        cred_service = ConfigCredentialService(self.session, self.settings)
-        credentials = await cred_service.get_all_for_active_subscriptions()
-        return await asyncio.to_thread(sync_all_active_clients, self.settings, credentials)
+        try:
+            cred_service = ConfigCredentialService(self.session, self.settings)
+            credentials = await cred_service.get_all_for_active_subscriptions()
+            return await asyncio.to_thread(sync_all_active_clients, self.settings, credentials)
+        except Exception:
+            logger.exception("Xray sync failed (non-fatal)")
+            return False
 
     async def build_hub_data(self, subscription: Subscription | None, bot_username: str) -> dict:
         bot_link = f"https://t.me/{bot_username}"

@@ -740,6 +740,7 @@ def create_admin_app() -> FastAPI:
         service = AdminService(session)
         referral_bonus = await service.get_referral_bonus_percent(settings)
         bot_admin_ids = await service.get_bot_admin_ids(settings)
+        connect_guide_text = await service.get_connect_guide_text(settings)
         root_admin_ids = settings.admin_telegram_ids
         success = request.query_params.get("success")
         error = request.query_params.get("error")
@@ -751,6 +752,7 @@ def create_admin_app() -> FastAPI:
                 "referral_bonus_percent": referral_bonus,
                 "bot_admin_ids": bot_admin_ids,
                 "root_admin_ids": root_admin_ids,
+                "connect_guide_text": connect_guide_text,
                 "success": success,
                 "error": error,
             },
@@ -802,6 +804,21 @@ def create_admin_app() -> FastAPI:
         service = AdminService(session)
         await service.set_referral_bonus_percent(settings, referral_bonus_percent)
         return RedirectResponse("/settings?success=1", status_code=302)
+
+    @app.post("/settings/connect-guide")
+    async def update_connect_guide(
+        request: Request,
+        connect_guide_text: str = Form(...),
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        service = AdminService(session)
+        try:
+            await service.set_connect_guide_text(settings, connect_guide_text)
+        except ValueError as exc:
+            return RedirectResponse(f"/settings?error={quote(str(exc))}", status_code=302)
+        return RedirectResponse("/settings?success=guide_saved", status_code=302)
 
     @app.get("/telegram-admins", response_class=HTMLResponse)
     async def telegram_admins_page(

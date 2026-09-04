@@ -23,7 +23,22 @@ async def _telegram_api(settings: Settings, method: str, payload: dict[str, Any]
                 json=payload,
             )
             if response.status_code != 200:
-                logger.warning("Telegram %s failed: %s", method, response.text[:200])
+                body = response.text[:300]
+                # Broken HTML in broadcast text — retry as plain text.
+                if (
+                    payload.get("parse_mode")
+                    and "can't parse entities" in body
+                ):
+                    retry = dict(payload)
+                    retry.pop("parse_mode", None)
+                    response = await client.post(
+                        f"https://api.telegram.org/bot{settings.bot_token}/{method}",
+                        json=retry,
+                    )
+                    if response.status_code == 200:
+                        return True
+                    body = response.text[:300]
+                logger.warning("Telegram %s failed: %s", method, body)
             return response.status_code == 200
     except Exception:
         logger.exception("Telegram API call failed: %s", method)

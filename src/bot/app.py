@@ -5,7 +5,17 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from src.bot.handlers import admin, devices, payment, profile, start, subscription
+from src.bot.handlers import (
+    admin,
+    broadcast,
+    devices,
+    direct_message,
+    payment,
+    profile,
+    reply_menu,
+    start,
+    subscription,
+)
 from src.bot.middlewares.db import DbSessionMiddleware
 from src.bot.middlewares.settings import SettingsMiddleware
 from src.core.config import get_settings
@@ -25,7 +35,10 @@ def create_bot() -> tuple[Bot, Dispatcher]:
     dp.update.middleware(DbSessionMiddleware())
 
     dp.include_router(start.router)
+    dp.include_router(reply_menu.router)
     dp.include_router(admin.router)
+    dp.include_router(broadcast.router)
+    dp.include_router(direct_message.router)
     dp.include_router(subscription.router)
     dp.include_router(profile.router)
     dp.include_router(payment.router)

@@ -1228,6 +1228,16 @@ class AdminService:
 
         return await SystemSettingsService(self.session, settings).remove_bot_admin_id(telegram_id)
 
+    async def get_connect_guide_text(self, settings: Settings) -> str:
+        from src.services.system_settings import SystemSettingsService
+
+        return await SystemSettingsService(self.session, settings).get_connect_guide_raw()
+
+    async def set_connect_guide_text(self, settings: Settings, text: str) -> str:
+        from src.services.system_settings import SystemSettingsService
+
+        return await SystemSettingsService(self.session, settings).set_connect_guide_text(text)
+
     # ── Manual VPN keys ──────────────────────────────────────────
 
     async def list_manual_keys(self, *, active_only: bool = True):

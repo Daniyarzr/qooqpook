@@ -9,6 +9,21 @@ from src.models import SystemSetting
 REFERRAL_BONUS_KEY = "referral_bonus_percent"
 REFERRAL_DISCOUNT_KEY = "referral_discount_percent"  # legacy
 BOT_ADMIN_IDS_KEY = "bot_admin_telegram_ids"
+CONNECT_GUIDE_KEY = "vpn_connect_guide_text"
+
+DEFAULT_CONNECT_GUIDE = """📲 <b>Как подключить VPN в приложение</b>
+
+1️⃣ Оформите подписку в боте и откройте раздел «Моя подписка»
+2️⃣ Скопируйте ссылку подписки
+3️⃣ Установите клиент <b>Happ</b>:
+   • iOS / Android — Happ
+   • Windows / macOS — Happ Desktop
+4️⃣ В Happ: ➕ → «Добавить из буфера» (или вставьте ссылку подписки)
+5️⃣ Выберите сервер и включите подключение
+
+💡 Если ссылка не открывается — обновите подписку в Happ (потянуть вниз).
+
+По вопросам: @{support_username}"""
 
 
 class SystemSettingsService:
@@ -95,3 +110,23 @@ class SystemSettingsService:
         dynamic.discard(int(telegram_id))
         await self.set(BOT_ADMIN_IDS_KEY, ",".join(str(item) for item in sorted(dynamic)))
         return await self.get_all_bot_admin_ids()
+
+    async def get_connect_guide_raw(self) -> str:
+        """Текст для редактирования в админке (с плейсхолдером {support_username})."""
+        raw = await self.get(CONNECT_GUIDE_KEY, None)
+        text = (raw or "").strip()
+        return text or DEFAULT_CONNECT_GUIDE
+
+    async def get_connect_guide_text(self) -> str:
+        support = (self.settings.support_username if self.settings else "qooqvpnsupport") or "qooqvpnsupport"
+        text = await self.get_connect_guide_raw()
+        return text.replace("{support_username}", support.lstrip("@"))
+
+    async def set_connect_guide_text(self, text: str) -> str:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            raise ValueError("Текст инструкции не может быть пустым")
+        if len(cleaned) > 3500:
+            raise ValueError("Текст слишком длинный (макс. 3500 символов)")
+        await self.set(CONNECT_GUIDE_KEY, cleaned)
+        return cleaned

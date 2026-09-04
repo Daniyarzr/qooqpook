@@ -204,6 +204,27 @@ class PaymentService:
             )
         await notify_telegram_admins(self.session, self.settings, text)
 
+    async def poll_pending_orders(self, *, limit: int = 50) -> int:
+        """Safety net when YooKassa webhook is missing — sync pending orders from API."""
+        if not self.yookassa.enabled:
+            return 0
+        pending = await self.orders.list_pending(limit=limit)
+        fulfilled = 0
+        for order in pending:
+            try:
+                result = await self.process_payment_success(order.external_id)
+            except Exception:
+                logger.exception("Failed polling payment order #%s", order.id)
+                continue
+            if result and result.status == PaymentStatus.SUCCEEDED:
+                fulfilled += 1
+                logger.info(
+                    "Polled pending order #%s → succeeded (user=%s)",
+                    order.id,
+                    order.user_id,
+                )
+        return fulfilled
+
     async def _ensure_subscription_fulfilled(self, order: PaymentOrder) -> None:
         if await self._is_subscription_fulfilled(order):
             return

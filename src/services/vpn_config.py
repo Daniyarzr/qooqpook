@@ -32,18 +32,113 @@ DEFAULT_REMARK = SUBSCRIPTION_REMARK
 PLACEHOLDER_UUID = "{uuid}"
 PLACEHOLDER_REMARKS = "{remarks}"
 
+# RU sites that must bypass VPN (client → direct IP), иначе маркетплейсы видят зарубежный exit.
 RU_DOMAINS = [
     "domain:vk.ru",
+    "domain:vk.com",
     "domain:yandex.ru",
+    "domain:yandex.net",
+    "domain:yastatic.net",
     "domain:gosuslugi.ru",
     "domain:mail.ru",
-    "domain:avito.ru",
-    "domain:wildberries.ru",
-    "domain:ozon.ru",
-    "domain:yastatic.net",
-    "domain:max.ru",
+    "domain:ok.ru",
     "domain:okcdn.ru",
+    "domain:avito.ru",
+    "domain:max.ru",
     "domain:oneme.ru",
+    # Wildberries
+    "domain:wildberries.ru",
+    "domain:wb.ru",
+    "domain:wbbasket.ru",
+    "domain:wbstatic.net",
+    "domain:wibes.ru",
+    "domain:wb-cloud.ru",
+    # Ozon
+    "domain:ozon.ru",
+    "domain:ozon.com",
+    "domain:ozonusercontent.com",
+    "domain:ozonru.me",
+    "domain:ozon-st.ru",
+]
+
+# Shared UUID always present on Xray — expired users get Telegram-only via Happ routing.
+EXPIRED_ANNOUNCE_UUID = uuid.UUID("c0ffee00-dead-4000-8000-00000000a001")
+EXPIRED_ANNOUNCE_EMAIL = "qooq-announce-telegram"
+
+# Instructional server names shown in Happ when subscription expired (like Freedom).
+EXPIRED_MESSAGE_REMARKS = [
+    "❌ Подписка закончилась",
+    "Продлите её в Telegram-боте",
+    "чтобы вернуть доступ",
+    "🧢 Telegram бот",
+]
+
+# Domains/IPs that must go through VPN after expiry (Telegram MTProto uses IPs!).
+# Do NOT use geoip:telegram / geosite:telegram — many Happ geoip.dat builds lack TELEGRAM.
+HAPP_TELEGRAM_PROXY_SITES = [
+    "domain:telegram.org",
+    "domain:telegram.me",
+    "domain:telegram.dog",
+    "domain:t.me",
+    "domain:tx.me",
+    "domain:telesco.pe",
+    "domain:tdesktop.com",
+    "domain:telegra.ph",
+    "domain:graph.org",
+    "domain:cdn-telegram.org",
+    "domain:telegram-cdn.org",
+    "domain:api.telegram.org",
+    "domain:core.telegram.org",
+    "domain:web.telegram.org",
+    "domain:desktop.telegram.org",
+    "domain:kws1.telegram.org",
+    "domain:kws2.telegram.org",
+    "domain:kws3.telegram.org",
+    "domain:kws4.telegram.org",
+    "domain:qooqvpn.ru",
+    "domain:app.qooqvpn.ru",
+    "domain:keys.qooqvpn.ru",
+]
+
+HAPP_TELEGRAM_PROXY_IPS = [
+    # Official Telegram DC / infra ranges (no geoip:telegram — missing in many .dat)
+    "91.108.4.0/22",
+    "91.108.8.0/22",
+    "91.108.12.0/22",
+    "91.108.16.0/22",
+    "91.108.20.0/22",
+    "91.108.36.0/23",
+    "91.108.38.0/23",
+    "91.108.56.0/22",
+    "149.154.160.0/20",
+    "185.76.151.0/24",
+    "67.198.55.0/24",
+    "95.161.64.0/20",
+]
+
+# Для Happ routing profile DirectSites (domain:…) + geo отдельно в DirectIp
+HAPP_DIRECT_SITES = [
+    "domain:wildberries.ru",
+    "domain:wb.ru",
+    "domain:wbbasket.ru",
+    "domain:wbstatic.net",
+    "domain:wibes.ru",
+    "domain:wb-cloud.ru",
+    "domain:ozon.ru",
+    "domain:ozon.com",
+    "domain:ozonusercontent.com",
+    "domain:ozonru.me",
+    "domain:ozon-st.ru",
+    "domain:vk.ru",
+    "domain:vk.com",
+    "domain:yandex.ru",
+    "domain:yandex.net",
+    "domain:yastatic.net",
+    "domain:gosuslugi.ru",
+    "domain:mail.ru",
+    "domain:ok.ru",
+    "domain:avito.ru",
+    "domain:max.ru",
 ]
 
 XRAY_CONFIG_TEMPLATE: dict[str, Any] = {
@@ -289,18 +384,46 @@ def export_lte_xhttp_json_template() -> str:
 
 
 def export_finland_direct_json_template() -> str:
-    """Direct VLESS to panel Xray inbound (Finland exit)."""
+    """Direct VLESS to panel :10086 (Finland exit) + RU/WB/Ozon → direct."""
     config = {
         "remarks": PLACEHOLDER_REMARKS,
         "log": {"loglevel": "warning"},
+        "dns": {
+            "queryStrategy": "UseIPv4",
+            "servers": [
+                "1.1.1.1",
+                {
+                    "address": "8.8.8.8",
+                    "domains": RU_DOMAINS.copy(),
+                    "port": 53,
+                },
+            ],
+        },
         "inbounds": [
             {
                 "listen": "127.0.0.1",
                 "port": 10808,
                 "protocol": "socks",
                 "settings": {"auth": "noauth", "udp": True},
+                "sniffing": {
+                    "enabled": True,
+                    "destOverride": ["http", "tls", "quic"],
+                    "routeOnly": True,
+                },
                 "tag": "socks",
-            }
+            },
+            {
+                "listen": "127.0.0.1",
+                "port": 10809,
+                "protocol": "http",
+                "settings": {},
+                "sniffing": {
+                    "enabled": True,
+                    "destOverride": ["http", "tls", "quic"],
+                    "routeOnly": True,
+                },
+                "tag": "http",
+            },
         ],
         "outbounds": [
             {
@@ -329,17 +452,99 @@ def export_finland_direct_json_template() -> str:
             },
             {
                 "protocol": "freedom",
-                "settings": {},
+                "settings": {"domainStrategy": "UseIP"},
                 "tag": "direct",
             },
+            {"protocol": "blackhole", "tag": "block"},
         ],
         "routing": {
-            "domainStrategy": "AsIs",
-            "rules": [],
+            "domainStrategy": "IPIfNonMatch",
+            "rules": [
+                {
+                    "type": "field",
+                    "outboundTag": "direct",
+                    "domain": RU_DOMAINS.copy(),
+                },
+                {
+                    "type": "field",
+                    "outboundTag": "direct",
+                    "ip": ["geoip:private", "geoip:ru"],
+                },
+            ],
         },
     }
     return json.dumps(config, ensure_ascii=False, indent=2)
 
+
+def _happ_routing_base(*, name: str, global_proxy: bool) -> dict[str, Any]:
+    return {
+        "Name": name,
+        "GlobalProxy": global_proxy,
+        "RemoteDNSType": "DoH",
+        "RemoteDNSDomain": "https://cloudflare-dns.com/dns-query",
+        "RemoteDNSIP": "1.1.1.1",
+        "DomesticDNSType": "DoH",
+        "DomesticDNSDomain": "https://dns.google/dns-query",
+        "DomesticDNSIP": "8.8.8.8",
+        "Geoipurl": (
+            "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
+        ),
+        "Geositeurl": (
+            "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
+        ),
+        "DnsHosts": {
+            "cloudflare-dns.com": "1.1.1.1",
+            "dns.google": "8.8.8.8",
+        },
+        "DirectSites": [],
+        "DirectIp": [
+            "geoip:private",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "169.254.0.0/16",
+        ],
+        "ProxySites": [],
+        "ProxyIp": [],
+        "BlockSites": [],
+        "BlockIp": [],
+        "DomainStrategy": "IPIfNonMatch",
+        "FakeDNS": False,
+        "RouteOrder": "block-proxy-direct",
+    }
+
+
+def _encode_happ_routing_link(profile: dict[str, Any], *, activate: bool = True) -> str:
+    encoded = base64.b64encode(
+        json.dumps(profile, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii")
+    action = "onadd" if activate else "add"
+    return f"happ://routing/{action}/{encoded}"
+
+
+def build_happ_ru_direct_routing_link(*, activate: bool = True) -> str:
+    """Happ subscription routing: WB/Ozon/RU → direct, остальное через выбранный сервер."""
+    profile = _happ_routing_base(name="QooQ RU Direct", global_proxy=True)
+    profile["DirectSites"] = HAPP_DIRECT_SITES.copy()
+    profile["DirectIp"] = [
+        "geoip:ru",
+        "geoip:private",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+    ]
+    return _encode_happ_routing_link(profile, activate=activate)
+
+
+def build_happ_telegram_only_routing_link(*, activate: bool = True) -> str:
+    """После истечения: через VPN только Telegram (домены + IP DC), остальное — direct."""
+    profile = _happ_routing_base(name="QooQ Telegram Only", global_proxy=False)
+    profile["ProxySites"] = HAPP_TELEGRAM_PROXY_SITES.copy()
+    profile["ProxyIp"] = HAPP_TELEGRAM_PROXY_IPS.copy()
+    # Prefer proxy match before direct so Telegram DC IPs are not leaked to ISP.
+    profile["RouteOrder"] = "proxy-block-direct"
+    return _encode_happ_routing_link(profile, activate=activate)
 
 def build_xray_config(
     client_uuid: uuid.UUID,
@@ -670,10 +875,11 @@ def build_credential_share_link(
         applied = json.loads(raw)
         applied["remarks"] = safe_remark
 
+    # Always vless:// (or hy2) in mixed subscription — Happ ignores bare JSON lines.
+    # RU/WB/Ozon bypass comes from happ://routing profile in the feed header/body.
     share = xray_config_to_share_link(applied, safe_remark)
     if share:
         return share
-    # Шаблон без распознанного outbound — не подменяем на Yandex
     raise ValueError(f"Не удалось собрать share-ссылку для конфига {safe_remark!r}")
 
 
@@ -690,6 +896,145 @@ def build_inactive_vless_link(remark: str = EXPIRED_SERVER_REMARK) -> str:
 def build_inactive_subscription_payload(remark: str = EXPIRED_SERVER_REMARK) -> str:
     body = build_inactive_vless_link(remark) + "\n"
     return base64.b64encode(body.encode("utf-8")).decode("ascii")
+
+
+def build_expired_limited_share_links(
+    config_type: str,
+    config_template: str,
+    *,
+    remarks: list[str] | None = None,
+    client_uuid: uuid.UUID | None = None,
+) -> list[str]:
+    """Happ feed for expired sub: telegram-only routing + instructional live profiles."""
+    announce_uuid = client_uuid or EXPIRED_ANNOUNCE_UUID
+    lines = [build_happ_telegram_only_routing_link(activate=True)]
+    for remark in remarks or EXPIRED_MESSAGE_REMARKS:
+        lines.append(
+            build_credential_share_link(
+                announce_uuid,
+                config_type,
+                config_template,
+                remark,
+            )
+        )
+    return lines
+
+
+def build_expired_fallback_share_links(
+    *,
+    remarks: list[str] | None = None,
+    client_uuid: uuid.UUID | None = None,
+) -> list[str]:
+    """Always-available expired feed via panel :10086 (no DB template needed)."""
+    announce_uuid = client_uuid or EXPIRED_ANNOUNCE_UUID
+    lines = [build_happ_telegram_only_routing_link(activate=True)]
+    for remark in remarks or EXPIRED_MESSAGE_REMARKS:
+        lines.append(
+            build_vless_link_for_server(
+                announce_uuid,
+                remark,
+                host=PANEL_TUNNEL_HOST,
+                port=PANEL_TUNNEL_PORT,
+            )
+        )
+    return lines
+
+
+def build_expired_limited_subscription_payload(
+    config_type: str,
+    config_template: str,
+) -> str:
+    return build_multi_share_links_payload(
+        build_expired_limited_share_links(config_type, config_template)
+    )
+
+
+def build_expired_telegram_xray_config(
+    config_template: str,
+    remark: str = "🧢 Telegram бот",
+) -> dict[str, Any]:
+    """Full JSON profile: proxy only Telegram/QooQ, block the rest."""
+    from src.services.vpn_config_store import apply_json_template
+
+    raw = config_template.strip()
+    if PLACEHOLDER_UUID in raw or "{uuid}" in raw:
+        config = apply_json_template(raw, EXPIRED_ANNOUNCE_UUID, sanitize_remark(remark))
+    else:
+        config = json.loads(raw)
+        config["remarks"] = sanitize_remark(remark)
+        for outbound in config.get("outbounds", []):
+            if outbound.get("protocol") != "vless":
+                continue
+            try:
+                outbound["settings"]["vnext"][0]["users"][0]["id"] = str(EXPIRED_ANNOUNCE_UUID)
+            except (KeyError, IndexError, TypeError):
+                continue
+
+    telegram_domains = [
+        "domain:telegram.org",
+        "domain:telegram.me",
+        "domain:t.me",
+        "domain:telesco.pe",
+        "domain:tdesktop.com",
+        "domain:telegra.ph",
+        "domain:api.telegram.org",
+        "domain:core.telegram.org",
+        "domain:web.telegram.org",
+        "domain:qooqvpn.ru",
+    ]
+    telegram_ips = [
+        "91.108.4.0/22",
+        "91.108.8.0/22",
+        "91.108.12.0/22",
+        "91.108.16.0/22",
+        "91.108.20.0/22",
+        "91.108.36.0/23",
+        "91.108.38.0/23",
+        "91.108.56.0/22",
+        "149.154.160.0/20",
+        "185.76.151.0/24",
+        "67.198.55.0/24",
+        "95.161.64.0/20",
+    ]
+    config["routing"] = {
+        "domainStrategy": "IPIfNonMatch",
+        "rules": [
+            {
+                "type": "field",
+                "outboundTag": "proxy",
+                "domain": telegram_domains,
+            },
+            {
+                "type": "field",
+                "outboundTag": "proxy",
+                "ip": telegram_ips,
+            },
+            {
+                "type": "field",
+                "outboundTag": "direct",
+                "ip": ["geoip:private"],
+            },
+            {
+                "type": "field",
+                "outboundTag": "block",
+                "port": "0-65535",
+            },
+        ],
+    }
+    # Ensure proxy/direct/block tags exist
+    tags = {o.get("tag") for o in config.get("outbounds", [])}
+    if "direct" not in tags:
+        config.setdefault("outbounds", []).append(
+            {"protocol": "freedom", "tag": "direct", "settings": {}}
+        )
+    if "block" not in tags:
+        config.setdefault("outbounds", []).append(
+            {"protocol": "blackhole", "tag": "block"}
+        )
+    for outbound in config.get("outbounds", []):
+        if outbound.get("protocol") == "vless" and not outbound.get("tag"):
+            outbound["tag"] = "proxy"
+    return config
 
 
 def build_xray_subscription_payload(client_uuid: uuid.UUID, remark: str = DEFAULT_REMARK) -> str:

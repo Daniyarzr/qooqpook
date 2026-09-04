@@ -1,9 +1,10 @@
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
+import logging
 
-from src.bot.keyboards.inline import back_to_menu, subscription_menu
+from src.bot.keyboards.inline import back_to_menu, promo_error_keyboard, subscription_menu
 from src.bot.states import PromoStates
 from src.bot.texts.messages import (
     EXTEND_INSUFFICIENT_BALANCE,
@@ -15,6 +16,7 @@ from src.bot.texts.messages import (
     PURCHASE_PAYMENT_CREATED,
     PURCHASE_PAYMENT_SUCCESS,
     SUBSCRIPTION_ACTIVE,
+    SUBSCRIPTION_EXPIRED,
     SUBSCRIPTION_NONE,
     SUBSCRIPTION_RESET_CONFIRM,
     SUBSCRIPTION_RESET_SUCCESS,
@@ -99,6 +101,15 @@ async def _resolve_subscription_view(
         )
         return text, subscription_menu(True, user.trial_used)
 
+    expired = await service.subscriptions.get_latest_expired_by_user(user.id)
+    if expired:
+        sub_url = build_subscription_url(settings.hub_domain, expired.subscription_token)
+        text = (
+            SUBSCRIPTION_EXPIRED.strip()
+            + f"\n\n🔗 Ваша ссылка: <code>{sub_url}</code>"
+        )
+        return text, subscription_menu(False, user.trial_used, expired=True)
+
     return SUBSCRIPTION_NONE, subscription_menu(False, user.trial_used)
 
 
@@ -150,8 +161,11 @@ async def activate_trial(callback: CallbackQuery, session: AsyncSession, setting
         expires_at=format_datetime_ru(sub.expires_at),
         subscription_url=sub_url,
     )
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_to_menu())
-    await callback.answer("🎁 Пробный период активирован!")
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_to_menu())
+        await callback.answer("🎁 Пробный период активирован!")
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to send trial success UI")
 
 
 @router.callback_query(F.data == "sub:plans")
@@ -210,9 +224,9 @@ async def confirm_purchase(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("sub:promo:"))
-async def ask_promo_code(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
-    plan_id = int(callback.data.split(":")[2])
+@router.callback_query(F.data.startswith("sub:promo:retry:"))
+async def retry_promo_code(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    plan_id = int(callback.data.split(":")[3])
     repo = PlanRepository(session)
     plan = await repo.get_by_id(plan_id)
     if not plan:
@@ -221,8 +235,32 @@ async def ask_promo_code(callback: CallbackQuery, state: FSMContext, session: As
 
     await state.set_state(PromoStates.waiting_code)
     await state.update_data(plan_id=plan_id)
+    cancel_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Отмена", callback_data=f"sub:buy:{plan_id}")],
+        ]
+    )
+    await callback.message.edit_text(
+        "🔄 Введите промокод ещё раз сообщением в чат.",
+        reply_markup=cancel_kb,
+    )
+    await callback.answer()
 
-    from src.bot.keyboards.inline import InlineKeyboardButton, InlineKeyboardMarkup
+
+@router.callback_query(F.data.startswith("sub:promo:"))
+async def ask_promo_code(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    parts = callback.data.split(":")
+    if len(parts) < 3 or parts[2] == "retry":
+        return
+    plan_id = int(parts[2])
+    repo = PlanRepository(session)
+    plan = await repo.get_by_id(plan_id)
+    if not plan:
+        await callback.answer("Тариф не найден", show_alert=True)
+        return
+
+    await state.set_state(PromoStates.waiting_code)
+    await state.update_data(plan_id=plan_id)
 
     cancel_kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -263,14 +301,21 @@ async def apply_promo_code(
 
     code = (message.text or "").strip()
     if not code:
-        await message.answer("Введите промокод текстом")
+        await message.answer(
+            "Введите промокод текстом",
+            reply_markup=promo_error_keyboard(plan_id),
+        )
         return
 
     promo_service = PromoCodeService(session)
     try:
         promo_validation = await promo_service.validate(code, user.id, plan)
     except ValueError as exc:
-        await message.answer(PROMO_INVALID.format(error=str(exc)))
+        # Keep waiting_code so user can enter another code after button press
+        await message.answer(
+            PROMO_INVALID.format(error=str(exc)),
+            reply_markup=promo_error_keyboard(plan_id),
+        )
         return
 
     pricing = await _resolve_display_pricing(
@@ -345,8 +390,14 @@ async def process_purchase_balance(
 
     service = SubscriptionService(session, settings)
     try:
+        # sync_xray=False: SSH к Yandex может висеть 20s+ и откатывать покупку
+        # (протухший Telegram callback → exception → rollback). UUID подхватит cron.
         sub = await service.extend_subscription(
-            user.id, plan.id, payment_method=PaymentMethod.BALANCE, promo_code_id=promo_id
+            user.id,
+            plan.id,
+            payment_method=PaymentMethod.BALANCE,
+            promo_code_id=promo_id,
+            sync_xray=False,
         )
     except ValueError as e:
         await callback.answer(str(e), show_alert=True)
@@ -358,24 +409,30 @@ async def process_purchase_balance(
         duration=format_duration_until(sub.expires_at),
         subscription_url=sub_url,
     )
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_to_menu())
-    await callback.answer("✅ Подписка оформлена!")
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_to_menu())
+        await callback.answer("✅ Подписка оформлена!")
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to send purchase success UI")
 
     from src.services.notifications import notify_telegram_admins
 
     uname = f"@{user.username}" if user.username else (user.first_name or "—")
-    await notify_telegram_admins(
-        session,
-        settings,
-        (
+    try:
+        await notify_telegram_admins(
+            session,
+            settings,
+            (
             "💳 <b>Новый платёж — подписка (баланс)</b>\n\n"
             f"👤 {uname}\n"
             f"🆔 Telegram ID: <code>{user.telegram_id}</code>\n"
             f"💎 Тариф: <b>{plan.name}</b>\n"
             f"💰 Сумма: <b>{price} ₽</b>\n"
             "🏦 Способ: баланс"
-        ),
-    )
+            ),
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Admin notify after balance purchase failed")
 
 @router.callback_query(F.data.startswith("sub:pay:yookassa:"))
 async def process_purchase_yookassa(
