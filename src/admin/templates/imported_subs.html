@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Импорт подписок{% endblock %}
+{% block content %}
+<h2>🌐 Импорт подписок</h2>
+<p class="muted" style="margin-bottom:20px;">
+    Ссылка как у Happ: base64-список VLESS. Рабочие серверы добавляются в подписку клиентов.
+    Каждые 30 минут порт проверяется снова. Два промаха подряд — сервер убирается.
+    Свои серверы QooQ не заменяются.
+</p>
+
+{% if error %}
+<p class="muted" style="color:#e74c3c;margin-bottom:16px;">⚠️ {{ error }}</p>
+{% endif %}
+{% if success == 'created' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">
+    ✅ Загружено. В списке: {{ parsed or 0 }}, отвечают: {{ alive or 0 }}, молчат: {{ dead or 0 }}.
+</p>
+{% elif success == 'refreshed' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">
+    ✅ Проверено. Отвечают: {{ alive or 0 }}, молчат: {{ dead or 0 }}, убрано: {{ removed or 0 }}.
+</p>
+{% elif success == 'deleted' %}
+<p class="muted" style="color:#2ecc71;margin-bottom:16px;">✅ Подписка удалена из выдачи</p>
+{% endif %}
+
+<section class="card" style="margin-bottom:24px;">
+    <h3>Добавить подписку</h3>
+    <form method="post" action="/imported-subs/create" class="inline-form" style="flex-direction:column;align-items:stretch;">
+        <div class="inline-form">
+            <input type="text" name="name" placeholder="Название (Vless VPN+)" class="input-sm" required maxlength="128" style="max-width:240px;">
+            <input type="url" name="url" placeholder="https://key.example/TOKEN" class="input-sm" required maxlength="1024" style="flex:1;">
+            <button type="submit" class="btn-sm btn-success">Загрузить и проверить</button>
+        </div>
+    </form>
+    <p class="muted">Проверка — это TCP-соединение с портом сервера, не полный VPN-хендшейк. Может занять до минуты.</p>
+</section>
+
+{% for source in sources %}
+<section class="card" style="margin-bottom:20px;">
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;">
+        <div>
+            <h3 style="margin-bottom:4px;">{{ source.name }}</h3>
+            <div class="muted"><code>{{ source.url }}</code></div>
+            <div class="muted">
+                {% if source.is_active %}
+                <span class="badge badge-green">В подписке</span>
+                {% else %}
+                <span class="badge badge-red">Выключена</span>
+                {% endif %}
+                {% if source.last_checked_at %}
+                · проверка {{ source.last_checked_at.strftime('%d.%m %H:%M') }}
+                {% endif %}
+                {% if source.last_error %}
+                · <span style="color:#e74c3c;">{{ source.last_error }}</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="actions">
+            <form method="post" action="/imported-subs/{{ source.id }}/refresh">
+                <button type="submit" class="btn-sm btn-success">Проверить сейчас</button>
+            </form>
+            <form method="post" action="/imported-subs/{{ source.id }}/toggle">
+                <button type="submit" class="btn-sm btn-warning">{% if source.is_active %}Выключить{% else %}Включить{% endif %}</button>
+            </form>
+            <form method="post" action="/imported-subs/{{ source.id }}/delete" onsubmit="return confirm('Убрать эту подписку из выдачи?');">
+                <button type="submit" class="btn-sm btn-danger">Удалить</button>
+            </form>
+        </div>
+    </div>
+    <div class="table-wrap" style="margin-top:12px;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Сервер</th>
+                    <th>Адрес</th>
+                    <th>Отклик</th>
+                    <th>Статус</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cfg in source.configs %}
+                <tr>
+                    <td>{{ cfg.remark or '—' }}</td>
+                    <td><code>{{ cfg.host }}</code></td>
+                    <td>{{ cfg.last_ping_ms if cfg.last_ping_ms is not none else '—' }} мс</td>
+                    <td>
+                        {% if cfg.is_alive %}
+                        <span class="badge badge-green">отвечает</span>
+                        {% else %}
+                        <span class="badge badge-red">молчит {{ cfg.fail_count }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" style="text-align:center;color:#8b949e;">Серверов нет</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% else %}
+<p class="muted">Подписок ещё нет.</p>
+{% endfor %}
+{% endblock %}

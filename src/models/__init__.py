@@ -59,6 +59,9 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
     trial_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    purchase_nudge_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -68,6 +71,9 @@ class User(Base):
         "User", remote_side="User.id", back_populates="referrals"
     )
     referrals: Mapped[list["User"]] = relationship("User", back_populates="referred_by")
+    partner_link: Mapped["PartnerLink | None"] = relationship(
+        "PartnerLink", back_populates="users"
+    )
     subscriptions: Mapped[list["Subscription"]] = relationship(
         "Subscription", back_populates="user", cascade="all, delete-orphan"
     )
@@ -76,9 +82,6 @@ class User(Base):
     )
     payment_orders: Mapped[list["PaymentOrder"]] = relationship(
         "PaymentOrder", back_populates="user", cascade="all, delete-orphan"
-    )
-    partner_link: Mapped["PartnerLink | None"] = relationship(
-        "PartnerLink", back_populates="users"
     )
 
 
@@ -463,4 +466,53 @@ class SystemSetting(Base):
     value: Mapped[str] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ImportedSubscription(Base):
+    """Внешняя подписка (base64-список VLESS), из которой берутся чужие серверы."""
+
+    __tablename__ = "imported_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128))
+    url: Mapped[str] = mapped_column(String(1024))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    configs: Mapped[list["ImportedConfig"]] = relationship(
+        "ImportedConfig",
+        back_populates="source",
+        cascade="all, delete-orphan",
+    )
+
+
+class ImportedConfig(Base):
+    __tablename__ = "imported_configs"
+    __table_args__ = (
+        UniqueConstraint("source_id", "fingerprint", name="uq_imported_config_fp"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_id: Mapped[int] = mapped_column(
+        ForeignKey("imported_subscriptions.id", ondelete="CASCADE"), index=True
+    )
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    remark: Mapped[str] = mapped_column(String(160), default="")
+    uri: Mapped[str] = mapped_column(Text)
+    host: Mapped[str] = mapped_column(String(255))
+    port: Mapped[int] = mapped_column(Integer)
+    is_alive: Mapped[bool] = mapped_column(Boolean, default=False)
+    fail_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_ping_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    source: Mapped["ImportedSubscription"] = relationship(
+        "ImportedSubscription", back_populates="configs"
     )

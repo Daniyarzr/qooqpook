@@ -416,7 +416,10 @@ async def subscription_feed(
     device_links = await _get_subscription_share_links(subscription, session, settings)
     # Happ: routing profile в теле подписки (WB/Ozon → direct)
     routing_link = build_happ_ru_direct_routing_link(activate=True)
-    device_links = [routing_link, *device_links]
+    from src.services.imported_subs import list_alive_uris
+
+    imported = await list_alive_uris(session)
+    device_links = [routing_link, *device_links, *imported]
     if format == "link":
         return PlainTextResponse(
             content="".join(f"{line}\n" for line in device_links),

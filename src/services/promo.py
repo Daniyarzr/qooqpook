@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.core.enums import PromoDiscountType
 from src.core.utils import utcnow
-from src.models import PromoCode, PromoCodeRedemption, SubscriptionPlan
+from src.models import PaymentOrder, PromoCode, PromoCodeRedemption, SubscriptionPlan
 
 
 @dataclass
@@ -185,8 +185,12 @@ class PromoCodeService:
         promo = await self.repo.get_by_id(promo_id)
         if not promo:
             return False
-        if promo.used_count > 0:
-            raise ValueError("Нельзя удалить промокод с историей использования")
+        # payment_orders хранит promo_code_id без ON DELETE SET NULL
+        await self.session.execute(
+            update(PaymentOrder)
+            .where(PaymentOrder.promo_code_id == promo_id)
+            .values(promo_code_id=None)
+        )
         await self.session.delete(promo)
         await self.session.flush()
         return True

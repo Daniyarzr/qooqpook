@@ -6,11 +6,11 @@ import asyncio
 import html
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from sqlalchemy import select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import selectinload
 
 from src.core.config import Settings
@@ -163,3 +163,113 @@ class ExpiryReminderService:
             text,
             reply_markup=renew_keyboard(),
         )
+
+
+# Users without an active subscription: first nudge 2 days after signup, then every 7 days.
+PURCHASE_NUDGE_FIRST_AFTER = timedelta(days=2)
+PURCHASE_NUDGE_INTERVAL = timedelta(days=7)
+PURCHASE_NUDGE_BATCH = 80
+
+
+def buy_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💎 Купить подписку", callback_data="sub:plans")],
+        ]
+    )
+
+
+def build_purchase_nudge_text(*, first_name: str | None, expired_at: datetime | None) -> str:
+    name = (first_name or "").strip()
+    greeting = f"Привет, <b>{html.escape(name)}</b>!" if name else "Привет!"
+    if expired_at is not None:
+        when = format_datetime_ru(expired_at)
+        return (
+            "🔔 <b>Подписка истекла</b>\n"
+            f"{'─' * 18}\n\n"
+            f"{greeting}\n\n"
+            f"Доступ к VPN приостановлен с <b>{when}</b> (МСК).\n"
+            "Продлите тариф — ссылка подписки останется той же.\n\n"
+            "Нажмите <b>«Продлить»</b> ниже."
+        )
+    return (
+        "👋 <b>QooQ VPN ждёт</b>\n"
+        f"{'─' * 18}\n\n"
+        f"{greeting}\n\n"
+        "Вы уже в боте, но подписка ещё не оформлена.\n"
+        "Один тариф — и VPN подключается в приложении.\n\n"
+        "Нажмите <b>«Купить»</b>, чтобы выбрать срок."
+    )
+
+
+class PurchaseNudgeService:
+    def __init__(self, session, settings: Settings) -> None:
+        self.session = session
+        self.settings = settings
+
+    async def process_due_nudges(self) -> dict[str, int]:
+        stats = {"checked": 0, "sent": 0, "failed": 0}
+        now = utcnow()
+        active_exists = exists(
+            select(Subscription.id).where(
+                Subscription.user_id == User.id,
+                Subscription.status.in_(
+                    [
+                        SubscriptionStatus.ACTIVE,
+                        SubscriptionStatus.TRIAL,
+                        SubscriptionStatus.SUSPENDED,
+                    ]
+                ),
+                Subscription.expires_at > now,
+            )
+        )
+        result = await self.session.execute(
+            select(User)
+            .options(selectinload(User.subscriptions))
+            .where(User.is_banned.is_(False))
+            .where(User.created_at <= now - PURCHASE_NUDGE_FIRST_AFTER)
+            .where(~active_exists)
+            .where(
+                or_(
+                    User.purchase_nudge_sent_at.is_(None),
+                    User.purchase_nudge_sent_at <= now - PURCHASE_NUDGE_INTERVAL,
+                )
+            )
+            .order_by(User.purchase_nudge_sent_at.asc().nulls_first(), User.created_at.asc())
+            .limit(PURCHASE_NUDGE_BATCH)
+        )
+        users = list(result.scalars().unique().all())
+        for user in users:
+            stats["checked"] += 1
+            expired_at = _latest_expiry(user)
+            text = build_purchase_nudge_text(
+                first_name=user_display_name(user),
+                expired_at=expired_at,
+            )
+            markup = renew_keyboard() if expired_at is not None else buy_keyboard()
+            ok = await send_telegram_message(
+                self.settings,
+                user.telegram_id,
+                text,
+                reply_markup=markup,
+            )
+            # Mark even on failure so a blocked chat is not retried every morning.
+            user.purchase_nudge_sent_at = now
+            if ok:
+                stats["sent"] += 1
+            else:
+                stats["failed"] += 1
+            await self.session.flush()
+            await asyncio.sleep(0.05)
+        return stats
+
+
+def _latest_expiry(user: User) -> datetime | None:
+    dated = [sub.expires_at for sub in user.subscriptions if sub.expires_at is not None]
+    if not dated:
+        return None
+    latest = max(dated)
+    if latest > utcnow():
+        return None
+    return latest
+

@@ -57,7 +57,13 @@
             <td>{{ user.balance }} ₽</td>
             <td>
                 {% if sub %}
+                {% if sub.status.value == 'expired' %}
+                <span class="badge badge-red">истекла</span>
+                {% elif sub.status.value == 'suspended' %}
+                <span class="badge badge-red">suspended</span>
+                {% else %}
                 <span class="badge badge-green">{{ sub.status.value }}</span>
+                {% endif %}
                 <br>
                 <small>до {{ sub.expires_at.strftime('%d.%m.%Y %H:%M') }}</small>
                 {% else %}
@@ -76,7 +82,7 @@
             <td>
                 <div class="actions">
                     <a href="/users/{{ user.id }}" class="btn-sm btn-success" style="text-decoration:none;display:inline-block;">Профиль</a>
-                    {% if sub %}
+                    {% if sub and sub.status.value != 'expired' %}
                     <form method="post" action="/users/{{ user.id }}/subscription/deactivate" style="display:inline">
                         <button type="submit" class="btn-sm btn-warning" title="Отключить доступ, запись останется">Деактивировать</button>
                     </form>

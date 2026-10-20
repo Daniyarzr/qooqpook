@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
+import logging
 from pathlib import Path
 from urllib.parse import quote
 
@@ -19,6 +20,7 @@ from src.db.session import get_session
 from src.models import Subscription
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+logger = logging.getLogger(__name__)
 
 def _get_serializer(settings: Settings) -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(settings.admin_secret_key)
@@ -327,7 +329,7 @@ def create_admin_app() -> FastAPI:
         service = AdminService(session)
         ok = await service.extend_user_subscription(user_id, days, settings)
         if not ok:
-            raise HTTPException(status_code=404, detail="Active subscription not found")
+            raise HTTPException(status_code=404, detail="Нет подписки для продления")
         return RedirectResponse(f"/users/{user_id}?success=extend", status_code=302)
 
     @app.post("/users/{user_id}/balance/adjust")
@@ -724,6 +726,12 @@ def create_admin_app() -> FastAPI:
             ok = await service.delete_promo_code(promo_id)
         except ValueError as exc:
             return RedirectResponse(f"/promo-codes?error={quote(str(exc))}", status_code=302)
+        except Exception as exc:
+            logger.exception("Failed to delete promo code %s", promo_id)
+            return RedirectResponse(
+                f"/promo-codes?error={quote('Не удалось удалить промокод: ' + str(exc))}",
+                status_code=302,
+            )
         if not ok:
             raise HTTPException(status_code=404, detail="Promo code not found")
         return RedirectResponse("/promo-codes?success=deleted", status_code=302)
@@ -1113,5 +1121,111 @@ def create_admin_app() -> FastAPI:
             background_tasks.add_task(_sync_xray_background)
         # Уже удалён / повторный клик — всё равно на список, без 404
         return RedirectResponse("/keys?success=deleted", status_code=302)
+
+    @app.get("/imported-subs", response_class=HTMLResponse)
+    async def imported_subs_page(
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        admin = get_current_admin(request)
+        if not admin:
+            return RedirectResponse("/login", status_code=302)
+        from src.services.imported_subs import list_sources
+
+        sources = await list_sources(session)
+        params = request.query_params
+        return templates.TemplateResponse(
+            request,
+            "imported_subs.html",
+            {
+                "admin": admin,
+                "sources": sources,
+                "error": params.get("error"),
+                "success": params.get("success"),
+                "parsed": params.get("parsed"),
+                "alive": params.get("alive"),
+                "dead": params.get("dead"),
+                "removed": params.get("removed"),
+            },
+        )
+
+    @app.post("/imported-subs/create")
+    async def imported_subs_create(
+        request: Request,
+        name: str = Form(...),
+        url: str = Form(...),
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        from src.models import ImportedSubscription
+        from src.services.imported_subs import refresh_source
+
+        source = ImportedSubscription(name=name.strip()[:128], url=url.strip()[:1024])
+        session.add(source)
+        await session.flush()
+        try:
+            stats = await refresh_source(session, source.id)
+        except ValueError as exc:
+            await session.delete(source)
+            await session.flush()
+            return RedirectResponse(f"/imported-subs?error={quote(str(exc))}", status_code=302)
+        return RedirectResponse(
+            f"/imported-subs?success=created&parsed={stats['parsed']}&alive={stats['alive']}&dead={stats['dead']}",
+            status_code=302,
+        )
+
+    @app.post("/imported-subs/{source_id}/refresh")
+    async def imported_subs_refresh(
+        source_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        from src.services.imported_subs import refresh_source
+
+        try:
+            stats = await refresh_source(session, source_id)
+        except ValueError as exc:
+            return RedirectResponse(f"/imported-subs?error={quote(str(exc))}", status_code=302)
+        return RedirectResponse(
+            "/imported-subs?success=refreshed"
+            f"&alive={stats['alive']}&dead={stats['dead']}&removed={stats['removed']}",
+            status_code=302,
+        )
+
+    @app.post("/imported-subs/{source_id}/toggle")
+    async def imported_subs_toggle(
+        source_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        from src.models import ImportedSubscription
+
+        source = await session.get(ImportedSubscription, source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Imported subscription not found")
+        source.is_active = not source.is_active
+        await session.flush()
+        return RedirectResponse("/imported-subs", status_code=302)
+
+    @app.post("/imported-subs/{source_id}/delete")
+    async def imported_subs_delete(
+        source_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_session),
+    ):
+        if not get_current_admin(request):
+            raise HTTPException(status_code=401)
+        from src.models import ImportedSubscription
+
+        source = await session.get(ImportedSubscription, source_id)
+        if source:
+            await session.delete(source)
+            await session.flush()
+        return RedirectResponse("/imported-subs?success=deleted", status_code=302)
 
     return app

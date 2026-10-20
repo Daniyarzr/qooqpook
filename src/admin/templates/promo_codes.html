@@ -95,12 +95,10 @@
                             {% if promo.is_active %}Выключить{% else %}Включить{% endif %}
                         </button>
                     </form>
-                    {% if promo.used_count == 0 %}
                     <form method="post" action="/promo-codes/{{ promo.id }}/delete"
-                          onsubmit="return confirm('Удалить промокод {{ promo.code }}?');">
+                          onsubmit="return confirm('{% if promo.used_count > 0 %}Промокод {{ promo.code }} использован {{ promo.used_count }} раз(а). Удалить вместе с историей использований?{% else %}Удалить промокод {{ promo.code }}?{% endif %}');">
                         <button type="submit" class="btn-sm btn-danger">Удалить</button>
                     </form>
-                    {% endif %}
                 </div>
             </td>
         </tr>

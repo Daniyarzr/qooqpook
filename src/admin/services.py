@@ -423,12 +423,17 @@ class AdminService:
 
     @staticmethod
     def get_manageable_subscription(user: User) -> Subscription | None:
-        for sub in sorted(user.subscriptions, key=lambda item: item.created_at, reverse=True):
+        """Active/trial/suspended, or the latest expired row so admin can renew it."""
+        ordered = sorted(user.subscriptions, key=lambda item: (item.expires_at, item.id), reverse=True)
+        for sub in ordered:
             if sub.status in (
                 SubscriptionStatus.ACTIVE,
                 SubscriptionStatus.TRIAL,
                 SubscriptionStatus.SUSPENDED,
             ):
+                return sub
+        for sub in ordered:
+            if sub.status == SubscriptionStatus.EXPIRED:
                 return sub
         return None
 
@@ -632,28 +637,43 @@ class AdminService:
         return await limit_service.try_reactivate(subscription)
 
     async def extend_user_subscription(self, user_id: int, days: int, settings: Settings) -> bool:
-        from src.core.utils import extend_expiry
+        from src.core.utils import extend_expiry, utcnow
         from src.repositories import SubscriptionRepository
         from src.services import SubscriptionService
+        from src.services.config_credentials import ConfigCredentialService
+        from src.services.devices import DeviceService
 
         if days <= 0:
             return False
 
         subs = SubscriptionRepository(self.session)
-        subscription = await subs.get_manageable_by_user(user_id)
+        subscription = await subs.get_renewable_by_user(user_id)
         if not subscription:
             return False
 
+        now = utcnow()
+        was_inactive = (
+            subscription.status == SubscriptionStatus.EXPIRED or subscription.expires_at <= now
+        )
         subscription.expires_at = extend_expiry(subscription.expires_at, days)
         subscription.status = SubscriptionStatus.ACTIVE
         subscription.is_trial = False
+        subscription.suspension_reason = None
         subscription.expiry_reminder_sent = None
         await self.session.flush()
+
+        if was_inactive:
+            devices = await DeviceService(self.session, settings).list_devices(subscription.id)
+            if not devices:
+                await DeviceService(self.session, settings).ensure_default_device(subscription)
+            await ConfigCredentialService(self.session, settings).ensure_credentials(subscription)
 
         service = SubscriptionService(self.session, settings)
         await service.sync_xray_clients()
 
         user = await self.get_user_by_id(user_id)
+        if user is not None:
+            user.purchase_nudge_sent_at = now
         if user and settings.bot_token:
             from src.core.utils import format_datetime_ru
             from src.services.notifications import send_telegram_message

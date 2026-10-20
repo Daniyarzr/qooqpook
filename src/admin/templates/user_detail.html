@@ -99,7 +99,10 @@
         <div class="panel">
             <div class="panel-title"><span>📅</span> Продление</div>
             <div class="form-panel">
-                <h4>Добавить дни к подписке</h4>
+                <h4>{% if subscription.status.value == 'expired' %}Возобновить истёкшую подписку{% else %}Добавить дни к подписке{% endif %}</h4>
+                {% if subscription.status.value == 'expired' %}
+                <p class="muted">Дни пойдут от сегодня. Ссылка подписки останется той же, доступ включится снова.</p>
+                {% endif %}
                 <form method="post" action="/users/{{ user.id }}/subscription/extend" class="form-row inline">
                     <div class="form-field" style="max-width:120px">
                         <label for="days">Дней</label>
@@ -119,14 +122,16 @@
             <dl class="info-grid">
                 <dt>Статус</dt>
                 <dd>
-                    {% if subscription.status.value == 'suspended' %}
-                    <span class="badge badge-red">{{ subscription.status.value }}</span>
-                    {% if subscription.suspension_reason == 'device_limit' %}
-                    <span class="badge badge-red">лимит устройств</span>
-                    {% endif %}
-                    {% else %}
-                    <span class="badge badge-green">{{ subscription.status.value }}</span>
-                    {% endif %}
+                {% if subscription.status.value == 'expired' %}
+                <span class="badge badge-red">истекла</span>
+                {% elif subscription.status.value == 'suspended' %}
+                <span class="badge badge-red">{{ subscription.status.value }}</span>
+                {% if subscription.suspension_reason == 'device_limit' %}
+                <span class="badge badge-red">лимит устройств</span>
+                {% endif %}
+                {% else %}
+                <span class="badge badge-green">{{ subscription.status.value }}</span>
+                {% endif %}
                 </dd>
                 <dt>Тариф</dt><dd>{{ subscription.plan.name if subscription.plan else ('Trial' if subscription.is_trial else '—') }}</dd>
                 <dt>Начало</dt><dd>{{ subscription.started_at.strftime('%d.%m.%Y %H:%M') }}</dd>
@@ -151,7 +156,7 @@
                 </form>
             </div>
             {% else %}
-            <p class="muted">Активной подписки нет.</p>
+            <p class="muted">Подписки ещё не было — продлевать нечего. Пользователь может купить тариф в боте.</p>
             {% endif %}
         </div>
 
